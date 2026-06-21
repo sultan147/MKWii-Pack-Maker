@@ -187,5 +187,3 @@ Built release ZIPs should be uploaded under **GitHub Releases**, not committed a
 
 - Wiimm for Wiimms SZS / ISO toolsets
 - HNS community testers and pack creators
-
-This project is not affiliated with Nintendo.
