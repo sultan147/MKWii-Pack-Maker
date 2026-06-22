@@ -7,8 +7,7 @@ release_portable/
 
 # Local app/runtime data
 Data/
-logs/*
-!logs/README.txt
+logs/
 
 # User-provided Nintendo/MKWii files - never commit these
 base_files/Scene/

@@ -14,8 +14,6 @@ using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using System.Windows.Forms;
-using SharpCompress.Archives;
-using SharpCompress.Common;
 
 namespace MKWiiPackMaker
 {
@@ -153,7 +151,7 @@ namespace MKWiiPackMaker
 
     public class MainForm : Form
     {
-        private const string AppVersion = "11.0.0";
+        private const string AppVersion = "12.0.0";
 
         private readonly Color Bg = Color.FromArgb(14, 17, 24);
         private readonly Color Bg2 = Color.FromArgb(18, 22, 32);
@@ -225,6 +223,7 @@ namespace MKWiiPackMaker
         private DataGridView UiRelGrid;
         private ComboBox ExportModeCombo;
         private TextBox OutputFolderText;
+        private Label ExportEstimateLabel;
         private CheckBox CopyMultiplayerCheck;
         private CheckBox CommunityFallbackCheck;
 
@@ -708,6 +707,46 @@ namespace MKWiiPackMaker
             }
         }
 
+
+        private void ShowReleaseSafetyCheck()
+        {
+            StringBuilder sb = new StringBuilder();
+            sb.AppendLine("GitHub / public release safety check");
+            sb.AppendLine("====================================");
+            sb.AppendLine();
+            int issues = 0;
+            Action<string> warn = delegate(string text) { issues++; sb.AppendLine("WARN - " + text); };
+            Action<string> ok = delegate(string text) { sb.AppendLine("OK   - " + text); };
+
+            string baseRoot = Path.Combine(AppRoot, "base_files");
+            if (Directory.Exists(Path.Combine(baseRoot, "Scene"))) warn("base_files/Scene exists. Do not publish extracted Nintendo UI/model files."); else ok("base_files/Scene not present.");
+            if (Directory.Exists(Path.Combine(baseRoot, "Race"))) warn("base_files/Race exists. Do not publish extracted Nintendo course/kart files."); else ok("base_files/Race not present.");
+            if (Directory.Exists(Path.Combine(baseRoot, "Sound")) || Directory.Exists(Path.Combine(baseRoot, "sound"))) warn("base_files/Sound exists. Do not publish extracted Nintendo sound files."); else ok("base_files/Sound not present.");
+
+            string[] riskyExt = new string[] { "*.wbfs", "*.iso", "*.szs", "*.brsar", "*.brres" };
+            foreach (string pattern in riskyExt)
+            {
+                int count = 0;
+                try { count = Directory.Exists(AppRoot) ? Directory.GetFiles(AppRoot, pattern, SearchOption.AllDirectories).Count(f => !f.Contains("\\bin\\") && !f.Contains("/bin/") && !f.Contains("\\obj\\") && !f.Contains("/obj/")) : 0; } catch { }
+                if ((pattern == "*.szs" || pattern == "*.brsar" || pattern == "*.brres") && count > 0) warn("Found " + count + " " + pattern + " file(s). Verify they are tools/test-safe and not Nintendo base files.");
+                else if ((pattern == "*.wbfs" || pattern == "*.iso") && count > 0) warn("Found " + count + " disc image file(s). Never publish WBFS/ISO files.");
+                else ok("No " + pattern + " files found under app folder.");
+            }
+
+            if (Directory.Exists(Path.Combine(AppRoot, "Data"))) warn("Data folder exists. Clean it before committing source."); else ok("Data folder not present.");
+            if (Directory.Exists(Path.Combine(AppRoot, "release")) || Directory.Exists(Path.Combine(AppRoot, "release_portable"))) warn("release/release_portable folder exists. Upload built ZIPs to GitHub Releases, not source."); else ok("release folders not present.");
+            if (Directory.Exists(Path.Combine(AppRoot, "build_publish"))) warn("build_publish folder exists. Remove old compiled output from source."); else ok("build_publish not present.");
+
+            string iconDir = Path.Combine(AppRoot, "assets", "character_icons");
+            int iconCount = 0;
+            try { if (Directory.Exists(iconDir)) iconCount = Directory.GetFiles(iconDir, "*.png", SearchOption.TopDirectoryOnly).Length; } catch { }
+            if (iconCount > 0) warn("assets/character_icons contains " + iconCount + " PNG icon(s). Only publish artwork you have rights to share."); else ok("No local character icon PNGs found.");
+
+            sb.AppendLine();
+            sb.AppendLine(issues == 0 ? "READY - No obvious public-release problems were found." : "CHECK - Fix or intentionally review " + issues + " item(s) before making the repo public.");
+            ShowLargeTextDialog("Release Safety Check", sb.ToString());
+        }
+
         private void OpenBaseFilesFolder()
         {
             try
@@ -1171,10 +1210,12 @@ namespace MKWiiPackMaker
             toolbar.Padding = new Padding(0, 0, 0, 10);
             layout.Controls.Add(toolbar, 0, 0);
             toolbar.Controls.Add(CreateActionButton("Add / Replace", Accent, delegate { AddTrackToSelectedSlot(); }));
+            toolbar.Controls.Add(CreateActionButton("Track Import Wizard", AccentPurple, delegate { ShowTrackImportWizardDialog(); }));
             toolbar.Controls.Add(CreateActionButton("Auto Fill Folder", AccentGreen, delegate { AutoFillFolder(); }));
             toolbar.Controls.Add(CreateActionButton("Import Existing HNS Pack", AccentPurple, delegate { ImportExistingPackDialog(); }));
             toolbar.Controls.Add(CreateActionButton("Clear Slot", Color.FromArgb(76, 86, 108), delegate { ClearSelectedSlot(); }));
             toolbar.Controls.Add(CreateActionButton("Validate", Warn, delegate { ValidatePack(true); }));
+            toolbar.Controls.Add(CreateActionButton("Validate Track SZS", AccentPurple, delegate { ShowTrackSzsValidatorDialog(); }));
 
             SlotGrid = CreateGrid();
             SlotGrid.CellClick += SlotGrid_CellClick;
@@ -1212,37 +1253,55 @@ namespace MKWiiPackMaker
             TableLayoutPanel layout = new TableLayoutPanel();
             layout.Dock = DockStyle.Fill;
             layout.BackColor = Bg;
-            layout.RowCount = 2;
+            layout.RowCount = 3;
             layout.ColumnCount = 1;
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 46));
             layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 58));
             layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
             PageHost.Controls.Add(layout);
+
+            Label help = new Label();
+            help.Dock = DockStyle.Fill;
+            help.BackColor = Card;
+            help.ForeColor = TextMuted;
+            help.Font = new Font("Segoe UI", 10f);
+            help.Padding = new Padding(18, 0, 18, 0);
+            help.TextAlign = ContentAlignment.MiddleLeft;
+            if (category == "Music") help.Text = "Music made simple: add .brstm files. Use Slot Helper when you do not know the internal MKWii music filename. _n = normal lap, _f = final lap.";
+            else if (category == "UI / REL Assets") help.Text = "Advanced Files are optional. Use them only for UI SZS, StaticR.rel, revo_kart.brsar, or exact files named by a mod readme.";
+            else help.Text = "Characters: import a complete character pack when possible. Use Check Conflicts before exporting.";
+            layout.Controls.Add(help, 0, 0);
 
             FlowLayoutPanel toolbar = new FlowLayoutPanel();
             toolbar.Dock = DockStyle.Fill;
             toolbar.BackColor = Bg;
             toolbar.FlowDirection = FlowDirection.LeftToRight;
-            toolbar.Padding = new Padding(0, 0, 0, 10);
-            layout.Controls.Add(toolbar, 0, 0);
-            toolbar.Controls.Add(CreateActionButton("Add Files", Accent, delegate { AddAssetFiles(category); }));
+            toolbar.Padding = new Padding(0, 8, 0, 8);
+            layout.Controls.Add(toolbar, 0, 1);
+            toolbar.Controls.Add(CreateActionButton(category == "Music" ? "Add Music" : category == "UI / REL Assets" ? "Add Advanced" : "Add Files", Accent, delegate { AddAssetFiles(category); }));
             if (category == "Music")
             {
-                toolbar.Controls.Add(CreateActionButton("Music Slot Helper", AccentGreen, delegate { ShowMusicSlotHelperDialog(); }));
+                toolbar.Controls.Add(CreateActionButton("Slot Helper", AccentGreen, delegate { ShowMusicSlotHelperDialog(); }));
+                toolbar.Controls.Add(CreateActionButton("Auto Pair", AccentPurple, delegate { AutoPairMusicAssets(); }));
+                toolbar.Controls.Add(CreateActionButton("Explain", Warn, delegate { ShowSelectedAssetExplanation("Music"); }));
             }
             if (category == "Characters")
             {
-                toolbar.Controls.Add(CreateActionButton("Import Character Pack", AccentPurple, delegate { ImportCharacterPackDialog(); }));
-                toolbar.Controls.Add(CreateActionButton("Sort by Character", Color.FromArgb(76, 86, 108), delegate { SortCharacterAssetsByDetectedCharacter(); }));
+                toolbar.Controls.Add(CreateActionButton("Import Pack", AccentPurple, delegate { ImportCharacterPackDialog(); }));
                 toolbar.Controls.Add(CreateActionButton("Check Conflicts", Warn, delegate { ShowCharacterConflictDialog(); }));
-                toolbar.Controls.Add(CreateActionButton("Character Summary", AccentGreen, delegate { ShowCharacterSummaryDialog(); }));
+                toolbar.Controls.Add(CreateActionButton("Summary", AccentGreen, delegate { ShowCharacterSummaryDialog(); }));
+            }
+            if (category == "UI / REL Assets")
+            {
+                toolbar.Controls.Add(CreateActionButton("Identify", AccentPurple, delegate { ShowAdvancedFileReportDialog(); }));
+                toolbar.Controls.Add(CreateActionButton("Explain", Warn, delegate { ShowSelectedAssetExplanation("UI / REL Assets"); }));
             }
             toolbar.Controls.Add(CreateActionButton("Scan Folder", AccentGreen, delegate { ScanAssetFolder(category); }));
-            toolbar.Controls.Add(CreateActionButton("Remove Selected", Color.FromArgb(76, 86, 108), delegate { RemoveSelectedAsset(category); }));
-            toolbar.Controls.Add(CreateActionButton("Open Example Rules", AccentPurple, delegate { ShowAssetRules(category); }));
+            toolbar.Controls.Add(CreateActionButton("Remove", Color.FromArgb(76, 86, 108), delegate { RemoveSelectedAsset(category); }));
 
             DataGridView grid = CreateGrid();
             grid.CellEndEdit += delegate { ApplyAssetGridEdits(category); };
-            layout.Controls.Add(grid, 0, 1);
+            layout.Controls.Add(grid, 0, 2);
             if (category == "Characters")
             {
                 grid.RowTemplate.Height = 42;
@@ -1253,8 +1312,8 @@ namespace MKWiiPackMaker
                 grid.Columns.Add(iconColumn);
                 grid.Columns.Add("Character", "Character");
                 grid.Columns.Add("FileType", "File Type");
-                grid.Columns.Add("OutputName", "Output Filename");
-                grid.Columns.Add("DiscPath", "Disc Path / Riivolution Target");
+                grid.Columns.Add("OutputName", "Export Name");
+                grid.Columns.Add("DiscPath", "Replaces In Game");
                 grid.Columns.Add("Source", "Source File");
                 grid.Columns.Add("Notes", "Notes / Warnings");
                 grid.Columns.Add("Status", "Status");
@@ -1277,21 +1336,33 @@ namespace MKWiiPackMaker
             }
             else
             {
-                grid.Columns.Add("OutputName", "Output Filename");
-                grid.Columns.Add("DiscPath", "Disc Path / Riivolution Target");
+                grid.Columns.Add("Kind", "Type");
+                grid.Columns.Add("Usage", "Purpose");
+                grid.Columns.Add("Folder", "Game Folder");
+                grid.Columns.Add("OutputName", "Export Name");
+                grid.Columns.Add("DiscPath", "Replaces In Game");
                 grid.Columns.Add("Source", "Source File");
-                grid.Columns.Add("Notes", "Notes");
+                grid.Columns.Add("Notes", "Hint");
+                grid.Columns.Add("Size", "Size");
                 grid.Columns.Add("Status", "Status");
-                grid.Columns[0].ReadOnly = false;
-                grid.Columns[1].ReadOnly = false;
+                grid.Columns[0].ReadOnly = true;
+                grid.Columns[1].ReadOnly = true;
                 grid.Columns[2].ReadOnly = true;
                 grid.Columns[3].ReadOnly = false;
-                grid.Columns[4].ReadOnly = true;
-                grid.Columns[0].FillWeight = 150;
-                grid.Columns[1].FillWeight = 220;
-                grid.Columns[2].FillWeight = 230;
-                grid.Columns[3].FillWeight = 140;
-                grid.Columns[4].FillWeight = 80;
+                grid.Columns[4].ReadOnly = false;
+                grid.Columns[5].ReadOnly = true;
+                grid.Columns[6].ReadOnly = false;
+                grid.Columns[7].ReadOnly = true;
+                grid.Columns[8].ReadOnly = true;
+                grid.Columns[0].FillWeight = 120;
+                grid.Columns[1].FillWeight = 170;
+                grid.Columns[2].FillWeight = 110;
+                grid.Columns[3].FillWeight = 135;
+                grid.Columns[4].FillWeight = 210;
+                grid.Columns[5].FillWeight = 150;
+                grid.Columns[6].FillWeight = 180;
+                grid.Columns[7].FillWeight = 65;
+                grid.Columns[8].FillWeight = 65;
             }
 
             if (category == "Music") MusicGrid = grid;
@@ -1303,9 +1374,9 @@ namespace MKWiiPackMaker
         private void ShowAssetRules(string category)
         {
             string text;
-            if (category == "Music") text = "Use .brstm files. For Riivolution/Dolphin, the default disc path is /sound/strm/<filename>. Keep original MKWii BRSTM names when you want a direct replacement. Use Music Slot Helper to assign one imported BRSTM to a normal/final-lap track music pair.";
+            if (category == "Music") text = "Music is streamed BRSTM audio. Normal race music usually uses *_n.brstm and final-lap music usually uses *_f.brstm. The game folder is normally /sound/strm. Use Music Slot Helper for track slots, Auto Pair Music for missing final-lap entries, and Explain Selected if you are unsure what a row does.";
             else if (category == "Characters") text = "Use complete character packs or loose .szs/.brres/.brsar/.tpl/.png files. The Characters table now detects the target character from filenames like la_bike-fk.szs, fk-allkart.szs, or allkart-fk.szs. Kart files go to /Race/Kart, Driver.szs goes to /Scene/Model, *-allkart.szs goes to /Scene/Model/Kart, and menu/text SZS files go to /Scene/UI. Inject PNG/TPL files are source files that are patched into real UI SZS files during export. Use Check Conflicts to find duplicate replacements, and Character Summary to check incomplete packs.";
-            else text = "Use .rel, .szs, .brsar, or .brres assets. StaticR region files are supported. UI files usually target /Scene/UI/<filename>. revo_kart.brsar targets /Sound/revo_kart.brsar.";
+            else text = "Advanced Files is for game system files: UI SZS archives go to /Scene/UI, StaticR REL files go to /rel, revo_kart.brsar goes to /sound, and BRRES resources are usually model/texture resources inside archives. Use Identify Files or Explain Selected before exporting if you are unsure.";
             MessageBox.Show(text, category + " Rules", MessageBoxButtons.OK, MessageBoxIcon.Information);
         }
 
@@ -1483,7 +1554,7 @@ namespace MKWiiPackMaker
 
             FlowLayoutPanel buttons = new FlowLayoutPanel();
             buttons.Dock = DockStyle.Bottom;
-            buttons.Height = 158;
+            buttons.Height = 205;
             buttons.BackColor = Card;
             buttons.Padding = new Padding(0, 16, 0, 0);
             left.Controls.Add(buttons);
@@ -1492,6 +1563,8 @@ namespace MKWiiPackMaker
             buttons.Controls.Add(CreateActionButton("Open Logs", Color.FromArgb(76, 86, 108), delegate { try { Directory.CreateDirectory(Path.Combine(AppRoot, "logs")); Process.Start(new ProcessStartInfo { FileName = Path.Combine(AppRoot, "logs"), UseShellExecute = true }); } catch { } }));
             buttons.Controls.Add(CreateActionButton("Clean Cache", Danger, delegate { CleanWorkingCacheNow(); }));
             buttons.Controls.Add(CreateActionButton("Project Cleanup", Color.FromArgb(76, 86, 108), delegate { ProjectCleanupNow(); }));
+            buttons.Controls.Add(CreateActionButton("Release Safety Check", AccentPurple, delegate { ShowReleaseSafetyCheck(); }));
+            buttons.Controls.Add(CreateActionButton("Check Sources", Warn, delegate { ShowSourceHealthReportDialog(); }));
 
             RoundedPanel right = CreateCard();
             right.Padding = new Padding(24);
@@ -1543,6 +1616,7 @@ namespace MKWiiPackMaker
             WritePatchLog("Ready. Put extracted MKWii files in ./base_files, or click Extract WBFS/ISO to extract them from your own disc image.");
             WritePatchLog("Expected base folders: Scene/UI, Scene/Model, Scene/Model/Kart, Race/Kart, Race/Course, Sound.");
             WritePatchLog("The extractor uses tools/wit.exe and copies only the required folders into base_files.");
+            WritePatchLog("Use Check Sources before exporting to catch missing or broken imported files.");
         }
 
         private void AddPatcherRow(TableLayoutPanel form, string label, TextBox box, int row, Action browseAction)
@@ -1890,18 +1964,18 @@ namespace MKWiiPackMaker
 
             TableLayoutPanel form = new TableLayoutPanel();
             form.Dock = DockStyle.Top;
-            form.Height = 330;
+            form.Height = 380;
             form.BackColor = Card;
             form.ColumnCount = 2;
-            form.RowCount = 6;
+            form.RowCount = 7;
             form.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 230));
             form.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-            for (int i = 0; i < 6; i++) form.RowStyles.Add(new RowStyle(SizeType.Absolute, 50));
+            for (int i = 0; i < 7; i++) form.RowStyles.Add(new RowStyle(SizeType.Absolute, 50));
             settings.Controls.Add(form);
             Label title = CreateSectionTitle("Export Settings");
             form.Controls.Add(title, 0, 0); form.SetColumnSpan(title, 2);
 
-            ExportModeCombo = CreateCombo(new string[] { "HNS / Riivolution", "Dolphin Riivolution Install", "CTGP My Stuff", "ISO Patch Staging" }, "HNS / Riivolution");
+            ExportModeCombo = CreateCombo(new string[] { "HNS / Riivolution", "CTGP My Stuff", "ISO Patch Staging" }, "HNS / Riivolution");
             AddFormRow(form, "Export Mode", ExportModeCombo, 1);
             OutputFolderText = CreateTextBox(string.IsNullOrWhiteSpace(ExportOutputParentFolder) ? Path.Combine(AppRoot, "output") : ExportOutputParentFolder);
             AddFormRow(form, "Output Parent Folder", OutputFolderText, 2);
@@ -1924,16 +1998,33 @@ namespace MKWiiPackMaker
             CommunityFallbackCheck.BackColor = Card;
             CommunityFallbackCheck.Font = new Font("Segoe UI", 10f);
             AddFormRow(form, "XML Style", CommunityFallbackCheck, 5);
+            ExportEstimateLabel = new Label();
+            ExportEstimateLabel.Text = EstimateExportSizeSummary();
+            ExportEstimateLabel.Dock = DockStyle.Fill;
+            ExportEstimateLabel.ForeColor = TextMain;
+            ExportEstimateLabel.Font = new Font("Segoe UI Semibold", 10f, FontStyle.Bold);
+            ExportEstimateLabel.TextAlign = ContentAlignment.MiddleLeft;
+            AddFormRow(form, "Estimated Size", ExportEstimateLabel, 6);
 
-            FlowLayoutPanel buttons = new FlowLayoutPanel();
+            TableLayoutPanel buttons = new TableLayoutPanel();
             buttons.Dock = DockStyle.Bottom;
-            buttons.Height = 70;
+            buttons.Height = 104;
             buttons.BackColor = Card;
-            buttons.Padding = new Padding(0, 14, 0, 0);
+            buttons.Padding = new Padding(0, 10, 0, 0);
+            buttons.ColumnCount = 3;
+            buttons.RowCount = 2;
+            buttons.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 33.33f));
+            buttons.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 33.33f));
+            buttons.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 33.34f));
+            buttons.RowStyles.Add(new RowStyle(SizeType.Percent, 50));
+            buttons.RowStyles.Add(new RowStyle(SizeType.Percent, 50));
             settings.Controls.Add(buttons);
-            buttons.Controls.Add(CreateActionButton("Build Export", AccentGreen, delegate { BuildExport(); }));
-            buttons.Controls.Add(CreateActionButton("Open Last Export", Accent, delegate { OpenLastExportFolder(); }));
-            buttons.Controls.Add(CreateActionButton("Validate", AccentPurple, delegate { ValidatePack(true); }));
+            AddButtonCell(buttons, CreateActionButton("Build Export", AccentGreen, delegate { BuildExport(); }), 0, 0);
+            AddButtonCell(buttons, CreateActionButton("Preview", AccentPurple, delegate { ShowExportPreviewDialog(); }), 1, 0);
+            AddButtonCell(buttons, CreateActionButton("Check Sources", Color.FromArgb(76, 86, 108), delegate { ShowSourceHealthReportDialog(); }), 2, 0);
+            AddButtonCell(buttons, CreateActionButton("Estimate Size", Warn, delegate { UpdateExportSizeEstimate(true); }), 0, 1);
+            AddButtonCell(buttons, CreateActionButton("XML Preview", Color.FromArgb(76, 86, 108), delegate { ShowRiivolutionXmlPreviewDialog(); }), 1, 1);
+            AddButtonCell(buttons, CreateActionButton("Open Output", Accent, delegate { OpenLastExportFolder(); }), 2, 1);
 
             RoundedPanel guide = CreateCard();
             guide.Padding = new Padding(26);
@@ -1945,7 +2036,7 @@ namespace MKWiiPackMaker
             guideText.Dock = DockStyle.Fill;
             guideText.ForeColor = TextMuted;
             guideText.Font = new Font("Segoe UI", 10.3f);
-            guideText.Text = "HNS / Riivolution:\n  hns/<pack id>/Tracks, Music, StaticR, Menu, Characters\n  riivolution/<pack id>.xml\n  exact UI/character mappings only\n\nAutomatic UI rule:\n  loose PNG/TXT files are not exported as game-ready files. Use base/patched SZS files for menu icons and names.\n\nCTGP My Stuff:\n  Flat My Stuff folder containing game-loadable files.\n\nISO Patch Staging:\n  files/Race/Course, files/sound/strm, files/Race/Kart, files/Scene/UI, files/rel.";
+            guideText.Text = "Simple export workflow:\n  1. Click Check Sources.\n  2. Click Preview to review replacement paths.\n  3. Click Estimate Size if needed.\n  4. Click Build Export.\n\nHNS / Riivolution output:\n  hns/<pack id>/Tracks, Music, StaticR, Menu, Characters\n  riivolution/<pack id>.xml\n\nNotes:\n  Loose PNG/TXT files are source inputs only. Export patches them into base UI SZS files where possible.\n\nCTGP My Stuff creates a flat My Stuff style folder.\nISO Patch Staging creates files/Race, files/sound, files/Scene, and files/rel.";
             guide.Controls.Add(guideText);
         }
 
@@ -2063,6 +2154,13 @@ namespace MKWiiPackMaker
             btn.Cursor = Cursors.Hand;
             btn.Click += delegate { action(); };
             return btn;
+        }
+
+        private void AddButtonCell(TableLayoutPanel table, Button button, int col, int row)
+        {
+            button.Dock = DockStyle.Fill;
+            button.Margin = new Padding(0, 0, 10, 8);
+            table.Controls.Add(button, col, row);
         }
 
         private void AddLabeled(TableLayoutPanel table, string label, Control control, int col, int row, int colspan = 1, int rowspan = 1)
@@ -2292,6 +2390,107 @@ namespace MKWiiPackMaker
             RefreshSlotGrid();
         }
 
+
+        private void ShowTrackSzsValidatorDialog()
+        {
+            ApplyGridEdits();
+            StringBuilder sb = new StringBuilder();
+            sb.AppendLine("Track SZS validation");
+            sb.AppendLine("====================");
+            sb.AppendLine();
+            List<TrackSlotInfo> selected = Slots.Where(x => !string.IsNullOrWhiteSpace(x.SourcePath)).ToList();
+            if (selected.Count == 0)
+            {
+                sb.AppendLine("No custom tracks have been assigned yet.");
+                MessageBox.Show(this, sb.ToString(), "Track SZS Validator", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            string wszst = !string.IsNullOrWhiteSpace(PatchWszstPath) && File.Exists(PatchWszstPath) ? PatchWszstPath : FindToolOnPath("wszst.exe");
+            if (string.IsNullOrWhiteSpace(wszst) || !File.Exists(wszst))
+            {
+                sb.AppendLine("wszst.exe was not found. Basic checks only:");
+                sb.AppendLine();
+            }
+
+            int ok = 0, warn = 0;
+            foreach (TrackSlotInfo slot in selected)
+            {
+                TrackValidationResult result = ValidateTrackSzsFile(slot, wszst);
+                if (result.Ok) ok++; else warn++;
+                sb.AppendLine((result.Ok ? "OK" : "CHECK") + " - " + slot.Cup + " / " + slot.TrackName + " -> " + slot.GameFile);
+                sb.AppendLine("  Source: " + Path.GetFileName(slot.SourcePath) + "  " + FormatBytes(FileSizeSafe(slot.SourcePath)));
+                foreach (string line in result.Lines) sb.AppendLine("  " + line);
+                sb.AppendLine();
+            }
+            sb.AppendLine("Summary: " + ok + " OK, " + warn + " need checking.");
+            AddLog("Track SZS validator finished. OK=" + ok + ", Check=" + warn + ".");
+            MessageBox.Show(this, sb.ToString(), "Track SZS Validator", MessageBoxButtons.OK, warn > 0 ? MessageBoxIcon.Warning : MessageBoxIcon.Information);
+        }
+
+        private class TrackValidationResult
+        {
+            public bool Ok = false;
+            public List<string> Lines = new List<string>();
+        }
+
+        private TrackValidationResult ValidateTrackSzsFile(TrackSlotInfo slot, string wszst)
+        {
+            TrackValidationResult r = new TrackValidationResult();
+            string path = slot.SourcePath ?? "";
+            if (!File.Exists(path))
+            {
+                r.Lines.Add("Missing source file.");
+                return r;
+            }
+            if (!Path.GetExtension(path).Equals(".szs", StringComparison.OrdinalIgnoreCase))
+            {
+                r.Lines.Add("Not an .szs file.");
+                return r;
+            }
+            long size = FileSizeSafe(path);
+            if (size < 100 * 1024) r.Lines.Add("Very small file size; this may not be a real course archive.");
+            if (string.IsNullOrWhiteSpace(wszst) || !File.Exists(wszst))
+            {
+                r.Ok = size >= 100 * 1024;
+                r.Lines.Add("Deep archive check skipped because wszst.exe is missing.");
+                return r;
+            }
+
+            string temp = Path.Combine(AppRoot, "Data", "TrackValidation", SafeId(Path.GetFileNameWithoutExtension(path)) + "_" + DateTime.Now.ToString("yyyyMMdd_HHmmss"));
+            try
+            {
+                if (Directory.Exists(temp)) Directory.Delete(temp, true);
+                Directory.CreateDirectory(temp);
+                string toolOutput;
+                if (!RunTool(wszst, "EXTRACT " + Quote(path) + " --dest " + Quote(temp) + " --overwrite", out toolOutput))
+                {
+                    r.Lines.Add("wszst could not extract the archive. " + toolOutput);
+                    return r;
+                }
+                string[] files = Directory.GetFiles(temp, "*.*", SearchOption.AllDirectories);
+                Func<string, bool> has = delegate(string leaf) { return files.Any(f => Path.GetFileName(f).Equals(leaf, StringComparison.OrdinalIgnoreCase)); };
+                bool hasKmp = has("course.kmp");
+                bool hasKcl = has("course.kcl");
+                bool hasModel = has("course_model.brres") || files.Any(f => Path.GetFileName(f).ToLowerInvariant().Contains("course") && Path.GetExtension(f).Equals(".brres", StringComparison.OrdinalIgnoreCase));
+                bool hasMap = has("map_model.brres") || files.Any(f => Path.GetFileName(f).ToLowerInvariant().Contains("map") && Path.GetExtension(f).Equals(".brres", StringComparison.OrdinalIgnoreCase));
+                r.Lines.Add((hasKmp ? "OK" : "MISSING") + " course.kmp gameplay data");
+                r.Lines.Add((hasKcl ? "OK" : "MISSING") + " course.kcl collision");
+                r.Lines.Add((hasModel ? "OK" : "MISSING") + " course model BRRES");
+                r.Lines.Add((hasMap ? "OK" : "INFO") + " minimap/map model");
+                r.Ok = hasKmp && hasKcl && hasModel;
+            }
+            catch (Exception ex)
+            {
+                r.Lines.Add("Validation error: " + ex.Message);
+            }
+            finally
+            {
+                try { if (Directory.Exists(temp)) Directory.Delete(temp, true); } catch { }
+            }
+            return r;
+        }
+
         private List<AssetFile> AssetsFor(string category)
         {
             if (category == "Music") return MusicAssets;
@@ -2306,19 +2505,377 @@ namespace MKWiiPackMaker
             return UiRelGrid;
         }
 
+
+        private void ShowTrackImportWizardDialog()
+        {
+            try { ApplyGridEdits(); } catch { }
+            string sourceRoot;
+            List<string> files;
+            if (!ChooseTrackImportSource(out sourceRoot, out files)) return;
+
+            string track = FindLikelyTrackSzs(files);
+            string normalMusic = FindLikelyMusic(files, false);
+            string finalMusic = FindLikelyMusic(files, true);
+
+            Form dialog = new Form();
+            dialog.Text = "Track Import Wizard";
+            dialog.StartPosition = FormStartPosition.CenterParent;
+            dialog.Size = new Size(720, 430);
+            dialog.MinimumSize = new Size(620, 390);
+            dialog.BackColor = Bg;
+
+            TableLayoutPanel layout = new TableLayoutPanel();
+            layout.Dock = DockStyle.Fill;
+            layout.BackColor = Bg;
+            layout.Padding = new Padding(18);
+            layout.ColumnCount = 2;
+            layout.RowCount = 7;
+            layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 170));
+            layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+            for (int i = 0; i < 7; i++) layout.RowStyles.Add(new RowStyle(SizeType.Absolute, i == 0 ? 54 : 44));
+            dialog.Controls.Add(layout);
+
+            Label title = CreateSectionTitle("Import a track package");
+            title.Text = "Import a track package";
+            layout.Controls.Add(title, 0, 0); layout.SetColumnSpan(title, 2);
+
+            ComboBox slotCombo = CreateCombo(Slots.Select((x, i) => (i + 1).ToString("00") + " - " + x.Cup + " - " + x.TrackName + " (" + x.GameFile + ")").ToArray(), "");
+            if (Slots.Count > 0) slotCombo.SelectedIndex = 0;
+            TextBox trackBox = CreateTextBox(track);
+            TextBox nameBox = CreateTextBox(CleanDisplayNameFromFile(track));
+            TextBox normalBox = CreateTextBox(normalMusic);
+            TextBox finalBox = CreateTextBox(finalMusic);
+            CheckBox addMusic = new CheckBox();
+            addMusic.Text = "Also add detected BRSTM music to this slot";
+            addMusic.Checked = File.Exists(normalMusic) || File.Exists(finalMusic);
+            addMusic.ForeColor = TextMain;
+            addMusic.BackColor = Bg;
+            addMusic.Dock = DockStyle.Fill;
+
+            AddWizardRow(layout, "Track Slot", slotCombo, 1);
+            AddWizardRow(layout, "Track SZS", trackBox, 2);
+            AddWizardRow(layout, "Custom Name", nameBox, 3);
+            AddWizardRow(layout, "Normal Music", normalBox, 4);
+            AddWizardRow(layout, "Final Lap Music", finalBox, 5);
+            layout.Controls.Add(new Label { Text = "Music", ForeColor = TextMuted, Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft, Font = new Font("Segoe UI", 10f) }, 0, 6);
+            layout.Controls.Add(addMusic, 1, 6);
+
+            FlowLayoutPanel bottom = new FlowLayoutPanel();
+            bottom.Dock = DockStyle.Bottom;
+            bottom.Height = 62;
+            bottom.FlowDirection = FlowDirection.RightToLeft;
+            bottom.Padding = new Padding(0, 10, 12, 8);
+            bottom.BackColor = Card;
+            Button cancel = CreateActionButton("Cancel", Color.FromArgb(76, 86, 108), delegate { dialog.Close(); });
+            Button import = CreateActionButton("Import", AccentGreen, delegate
+            {
+                int idx = slotCombo.SelectedIndex;
+                if (idx < 0 || idx >= Slots.Count)
+                {
+                    MessageBox.Show(this, "Choose a valid track slot.", "Track Import Wizard", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return;
+                }
+                if (!File.Exists(trackBox.Text) || !trackBox.Text.EndsWith(".szs", StringComparison.OrdinalIgnoreCase))
+                {
+                    MessageBox.Show(this, "The detected track SZS is missing or invalid.", "Track Import Wizard", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return;
+                }
+                Slots[idx].SourcePath = trackBox.Text.Trim();
+                if (!string.IsNullOrWhiteSpace(nameBox.Text)) Slots[idx].CustomName = nameBox.Text.Trim();
+                if (addMusic.Checked)
+                {
+                    string normalTarget = SuggestMusicNormalForSlot(idx);
+                    string finalTarget = SuggestMusicFinalFromNormal(normalTarget);
+                    if (File.Exists(normalBox.Text)) AddOrReplaceMusicAsset(normalBox.Text.Trim(), normalTarget);
+                    if (File.Exists(finalBox.Text) && !string.IsNullOrWhiteSpace(finalTarget)) AddOrReplaceMusicAsset(finalBox.Text.Trim(), finalTarget);
+                }
+                RefreshSlotGrid();
+                RefreshAssetGrid("Music");
+                AddLog("Track Import Wizard imported " + Path.GetFileName(trackBox.Text) + " into " + Slots[idx].TrackName + ".");
+                dialog.Close();
+            });
+            bottom.Controls.Add(import);
+            bottom.Controls.Add(cancel);
+            dialog.Controls.Add(bottom);
+            dialog.ShowDialog(this);
+        }
+
+        private void AddWizardRow(TableLayoutPanel layout, string label, Control control, int row)
+        {
+            Label l = new Label();
+            l.Text = label;
+            l.Dock = DockStyle.Fill;
+            l.ForeColor = TextMuted;
+            l.Font = new Font("Segoe UI", 10f);
+            l.TextAlign = ContentAlignment.MiddleLeft;
+            layout.Controls.Add(l, 0, row);
+            control.Dock = DockStyle.Fill;
+            layout.Controls.Add(control, 1, row);
+        }
+
+        private bool ChooseTrackImportSource(out string sourceRoot, out List<string> files)
+        {
+            sourceRoot = "";
+            files = new List<string>();
+            DialogResult mode = MessageBox.Show(this, "Choose Yes for a .szs/.zip file.\nChoose No for a folder containing a track package.", "Track Import Wizard", MessageBoxButtons.YesNoCancel, MessageBoxIcon.Question);
+            if (mode == DialogResult.Cancel) return false;
+            if (mode == DialogResult.No)
+            {
+                FolderBrowserDialog fbd = new FolderBrowserDialog();
+                fbd.Description = "Choose the track package folder";
+                if (fbd.ShowDialog(this) != DialogResult.OK) return false;
+                sourceRoot = fbd.SelectedPath;
+                files = Directory.GetFiles(sourceRoot, "*.*", SearchOption.AllDirectories).ToList();
+                return true;
+            }
+
+            OpenFileDialog ofd = new OpenFileDialog();
+            ofd.Title = "Choose track .szs or package .zip";
+            ofd.Filter = "Track or package (*.szs;*.zip)|*.szs;*.zip|All files (*.*)|*.*";
+            if (ofd.ShowDialog(this) != DialogResult.OK) return false;
+            if (ofd.FileName.EndsWith(".zip", StringComparison.OrdinalIgnoreCase))
+            {
+                string extract = Path.Combine(AppRoot, "Data", "TrackImports", SafeId(Path.GetFileNameWithoutExtension(ofd.FileName)) + "_" + DateTime.Now.ToString("yyyyMMdd_HHmmss"));
+                Directory.CreateDirectory(extract);
+                ZipFile.ExtractToDirectory(ofd.FileName, extract, true);
+                sourceRoot = extract;
+                files = Directory.GetFiles(sourceRoot, "*.*", SearchOption.AllDirectories).ToList();
+                return true;
+            }
+            sourceRoot = Path.GetDirectoryName(ofd.FileName) ?? AppRoot;
+            files = Directory.GetFiles(sourceRoot, "*.*", SearchOption.AllDirectories).ToList();
+            if (!files.Contains(ofd.FileName, StringComparer.OrdinalIgnoreCase)) files.Add(ofd.FileName);
+            return true;
+        }
+
+        private string FindLikelyTrackSzs(List<string> files)
+        {
+            return files.Where(f => f.EndsWith(".szs", StringComparison.OrdinalIgnoreCase))
+                .Where(f => !Path.GetFileName(f).EndsWith("_d.szs", StringComparison.OrdinalIgnoreCase))
+                .Where(f => !IsKnownUiSzs(Path.GetFileName(f)))
+                .OrderByDescending(f => FileSizeSafe(f))
+                .FirstOrDefault() ?? files.FirstOrDefault(f => f.EndsWith(".szs", StringComparison.OrdinalIgnoreCase)) ?? "";
+        }
+
+        private string FindLikelyMusic(List<string> files, bool finalLap)
+        {
+            IEnumerable<string> brstms = files.Where(f => f.EndsWith(".brstm", StringComparison.OrdinalIgnoreCase));
+            string suffix = finalLap ? "_f.brstm" : "_n.brstm";
+            string found = brstms.FirstOrDefault(f => Path.GetFileName(f).EndsWith(suffix, StringComparison.OrdinalIgnoreCase));
+            if (!string.IsNullOrWhiteSpace(found)) return found;
+            if (!finalLap) return brstms.FirstOrDefault() ?? "";
+            return "";
+        }
+
+        private string CleanDisplayNameFromFile(string path)
+        {
+            if (string.IsNullOrWhiteSpace(path)) return "";
+            string name = Path.GetFileNameWithoutExtension(path).Replace('_', ' ').Replace('-', ' ').Trim();
+            return CultureTitleCase(name);
+        }
+
+        private string CultureTitleCase(string text)
+        {
+            if (string.IsNullOrWhiteSpace(text)) return "";
+            string[] words = text.Split(new char[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
+            for (int i = 0; i < words.Length; i++) words[i] = words[i].Length <= 1 ? words[i].ToUpperInvariant() : char.ToUpperInvariant(words[i][0]) + words[i].Substring(1).ToLowerInvariant();
+            return string.Join(" ", words);
+        }
+
+        private string ParentDiscFolder(string disc)
+        {
+            disc = NormalizeDiscPath(disc);
+            if (string.IsNullOrWhiteSpace(disc)) return "";
+            int pos = disc.LastIndexOf('/');
+            if (pos <= 0) return disc;
+            return disc.Substring(0, pos);
+        }
+
+        private void ShowSelectedAssetExplanation(string category)
+        {
+            ApplyAssetGridEdits(category);
+            DataGridView grid = GridFor(category);
+            List<AssetFile> list = AssetsFor(category);
+            if (grid == null || list.Count == 0)
+            {
+                MessageBox.Show(this, "No files are listed yet.", "Explain Selected", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+            int idx = grid.SelectedRows.Count > 0 ? grid.SelectedRows[0].Index : grid.CurrentCell != null ? grid.CurrentCell.RowIndex : 0;
+            if (idx < 0 || idx >= list.Count) idx = 0;
+            MessageBox.Show(this, BuildAssetExplanation(list[idx], category), "Explain Selected File", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            RefreshAssetGrid(category);
+        }
+
+        private string BuildAssetExplanation(AssetFile a, string category)
+        {
+            GeneralAssetInfo info = AnalyzeGeneralAsset(a, category);
+            StringBuilder sb = new StringBuilder();
+            sb.AppendLine("File: " + Path.GetFileName(a.SourcePath));
+            sb.AppendLine("Type: " + info.Kind);
+            sb.AppendLine("What it changes: " + info.Usage);
+            sb.AppendLine("MKWii folder: " + info.Folder);
+            sb.AppendLine("Output filename: " + a.OutputName);
+            sb.AppendLine("Disc/Riivolution target: " + (string.IsNullOrWhiteSpace(a.DiscPath) ? DefaultDiscPath(category, a.OutputName) : a.DiscPath));
+            if (!string.IsNullOrWhiteSpace(info.Details)) sb.AppendLine(info.Details);
+            if (!string.IsNullOrWhiteSpace(info.Warning)) sb.AppendLine("Warning: " + info.Warning);
+            sb.AppendLine();
+            sb.AppendLine("Suggested action:");
+            sb.AppendLine(info.SuggestedAction);
+            return sb.ToString();
+        }
+
+        private void ShowSourceHealthReportDialog()
+        {
+            try
+            {
+                ApplyGridEdits();
+                ApplyAssetGridEdits("Music");
+                ApplyAssetGridEdits("Characters");
+                ApplyAssetGridEdits("UI / REL Assets");
+            }
+            catch { }
+            ShowLargeTextDialog("Missing / Broken Source Checker", BuildSourceHealthReport());
+        }
+
+        private string BuildSourceHealthReport()
+        {
+            StringBuilder sb = new StringBuilder();
+            List<string> problems = new List<string>();
+            List<string> warnings = new List<string>();
+            sb.AppendLine("Missing / broken source checker");
+            sb.AppendLine("===============================");
+            sb.AppendLine();
+            foreach (TrackSlotInfo slot in Slots.Where(x => !string.IsNullOrWhiteSpace(x.SourcePath)))
+            {
+                if (!File.Exists(slot.SourcePath)) problems.Add("Track missing source: " + slot.TrackName + " -> " + slot.SourcePath);
+                else if (!slot.SourcePath.EndsWith(".szs", StringComparison.OrdinalIgnoreCase)) problems.Add("Track is not .szs: " + slot.TrackName + " -> " + slot.SourcePath);
+                else if (FileSizeSafe(slot.SourcePath) < 100 * 1024) warnings.Add("Track looks very small: " + slot.TrackName + " -> " + FormatBytes(FileSizeSafe(slot.SourcePath)));
+            }
+            CheckAssetHealth("Music", MusicAssets, problems, warnings);
+            CheckAssetHealth("Characters", CharacterAssets, problems, warnings);
+            CheckAssetHealth("Advanced", UiRelAssets, problems, warnings);
+
+            var duplicateTargets = MusicAssets.Concat(CharacterAssets).Concat(UiRelAssets)
+                .Where(a => !string.IsNullOrWhiteSpace(a.DiscPath))
+                .GroupBy(a => NormalizeDiscPath(a.DiscPath), StringComparer.OrdinalIgnoreCase)
+                .Where(g => g.Count() > 1)
+                .ToList();
+            foreach (var g in duplicateTargets) warnings.Add("Duplicate target: " + g.Key + " used by " + g.Count() + " files.");
+
+            sb.AppendLine("Problems: " + problems.Count);
+            sb.AppendLine("Warnings: " + warnings.Count);
+            sb.AppendLine();
+            if (problems.Count == 0 && warnings.Count == 0)
+            {
+                sb.AppendLine("No missing sources, invalid extensions, or duplicate targets were found.");
+            }
+            else
+            {
+                if (problems.Count > 0)
+                {
+                    sb.AppendLine("Problems to fix before export");
+                    sb.AppendLine("-----------------------------");
+                    foreach (string p in problems) sb.AppendLine("- " + p);
+                    sb.AppendLine();
+                }
+                if (warnings.Count > 0)
+                {
+                    sb.AppendLine("Warnings to review");
+                    sb.AppendLine("------------------");
+                    foreach (string w in warnings) sb.AppendLine("- " + w);
+                    sb.AppendLine();
+                }
+            }
+            return sb.ToString();
+        }
+
+        private void CheckAssetHealth(string label, List<AssetFile> list, List<string> problems, List<string> warnings)
+        {
+            foreach (AssetFile a in list)
+            {
+                string source = a.SourcePath ?? "";
+                string outName = a.OutputName ?? "";
+                string ext = Path.GetExtension(source).ToLowerInvariant();
+                if (!File.Exists(source)) problems.Add(label + " missing source: " + source);
+                if (string.IsNullOrWhiteSpace(outName)) problems.Add(label + " has empty output filename: " + Path.GetFileName(source));
+                if (label == "Music" && ext != ".brstm" && ext != ".brsar") problems.Add("Music file has wrong extension: " + Path.GetFileName(source));
+                if (label == "Advanced" && ext != ".szs" && ext != ".rel" && ext != ".brsar" && ext != ".brres") warnings.Add("Advanced file has unusual extension: " + Path.GetFileName(source));
+                GeneralAssetInfo info = AnalyzeGeneralAsset(a, label == "Advanced" ? "UI / REL Assets" : label);
+                if (!string.IsNullOrWhiteSpace(info.Warning)) warnings.Add(label + " check: " + Path.GetFileName(source) + " - " + info.Warning);
+            }
+        }
+
+        private void ShowExportErrorHelpDialog()
+        {
+            ShowLargeTextDialog("Export Error Help", BuildExportErrorHelpText());
+        }
+
+        private string BuildExportErrorHelpText()
+        {
+            return "Export error helper\n" +
+                   "===================\n\n" +
+                   "If export fails, read the first real error line in Logs, then use this map:\n\n" +
+                   "wszst failed -> an SZS archive may be corrupt, locked, or not a real MKWii SZS.\n" +
+                   "wbmgt failed -> BMG text patching failed; check base UI files and language/region.\n" +
+                   "wimgt failed -> image conversion failed; check cup icon format, size, or transparency.\n" +
+                   "wit failed -> WBFS/ISO extraction failed; check the disc image path and free disk space.\n" +
+                   "UnauthorizedAccess -> close Dolphin/Explorer preview or choose a writable output folder.\n" +
+                   "File not found -> run Check Sources and confirm base_files are extracted.\n" +
+                   "Path too long -> use a shorter project path like C:\\MKWiiPackMaker.\n\n" +
+                   "Best fix order:\n" +
+                   "2. Setup/Export > Check Sources.\n" +
+                   "3. Tracks > Validate Track SZS.\n" +
+                   "4. Export > Preview Export.\n" +
+                   "5. Build again.\n";
+        }
+
+        private string ExplainExportError(string message)
+        {
+            string m = (message ?? "").ToLowerInvariant();
+            if (m.Contains("wszst")) return "Likely cause: SZS archive extraction/build failed. Check that your track/UI SZS files are valid and not locked.";
+            if (m.Contains("wbmgt") || m.Contains("bmg")) return "Likely cause: BMG text patch failed. Check Setup language/region and base Scene/UI files.";
+            if (m.Contains("wimgt") || m.Contains("image")) return "Likely cause: cup/icon image conversion failed. Use PNG files with normal dimensions and transparency.";
+            if (m.Contains("wit") || m.Contains("wbfs") || m.Contains("iso")) return "Likely cause: disc extraction failed. Check the WBFS/ISO file and free disk space.";
+            if (m.Contains("unauthorized") || m.Contains("access")) return "Likely cause: Windows blocked file access. Close programs using the folder or choose another output folder.";
+            if (m.Contains("not find") || m.Contains("not found") || m.Contains("missing")) return "Likely cause: a source or base file is missing. Run Check Sources and verify base_files.";
+            if (m.Contains("path") && m.Contains("long")) return "Likely cause: Windows path length issue. Move the app/project to a shorter folder path.";
+            return "Tip: run Check Sources, Preview Export, and Track SZS Validator to locate the likely bad file.";
+        }
+
+
         private void AddAssetFiles(string category)
         {
             OpenFileDialog ofd = new OpenFileDialog();
-            ofd.Title = "Add " + category + " files";
             ofd.Multiselect = true;
-            if (category == "Music") ofd.Filter = "BRSTM music (*.brstm)|*.brstm|All files (*.*)|*.*";
-            else if (category == "Characters") ofd.Filter = "Character pack files (*.szs;*.brres;*.brsar;*.tpl;*.png)|*.szs;*.brres;*.brsar;*.tpl;*.png|All files (*.*)|*.*";
-            else ofd.Filter = "MKWii assets (*.szs;*.rel;*.brsar;*.brres)|*.szs;*.rel;*.brsar;*.brres|All files (*.*)|*.*";
+            ofd.Title = "Add " + (category == "UI / REL Assets" ? "Advanced Files" : category);
+
+            if (category == "Music")
+            {
+                ofd.Filter = "MKWii music (*.brstm)|*.brstm|All files (*.*)|*.*";
+            }
+            else if (category == "Characters")
+            {
+                ofd.Filter = "Character / vehicle files (*.szs;*.brres;*.brsar;*.tpl;*.png)|*.szs;*.brres;*.brsar;*.tpl;*.png|All files (*.*)|*.*";
+            }
+            else
+            {
+                ofd.Filter = "Advanced MKWii files (*.szs;*.rel;*.brsar;*.brres)|*.szs;*.rel;*.brsar;*.brres|All files (*.*)|*.*";
+            }
+
             if (ofd.ShowDialog(this) != DialogResult.OK) return;
+
             int added = 0;
-            foreach (string file in ofd.FileNames) { AddAsset(category, file); added++; }
-            AddLog("Added " + added + " " + category + " asset(s).");
+            foreach (string file in ofd.FileNames)
+            {
+                if (string.IsNullOrWhiteSpace(file) || !File.Exists(file)) continue;
+                int before = AssetsFor(category).Count;
+                AddAsset(category, file, null);
+                if (AssetsFor(category).Count > before) added++;
+            }
+
             RefreshAssetGrid(category);
+            AddLog("Added " + added + " " + category + " file(s).");
         }
 
         private void ScanAssetFolder(string category)
@@ -2815,9 +3372,9 @@ namespace MKWiiPackMaker
                 }
                 else
                 {
-                    list[i].OutputName = SafeRelativePathForProject(Cell(grid, i, 0));
-                    list[i].DiscPath = NormalizeDiscPath(Cell(grid, i, 1));
-                    list[i].Notes = Cell(grid, i, 3);
+                    list[i].OutputName = SafeRelativePathForProject(Cell(grid, i, 3));
+                    list[i].DiscPath = NormalizeDiscPath(Cell(grid, i, 4));
+                    list[i].Notes = Cell(grid, i, 6);
                 }
             }
         }
@@ -2852,12 +3409,243 @@ namespace MKWiiPackMaker
                 }
                 else
                 {
-                    string status = File.Exists(a.SourcePath) ? "Ready" : "Invalid";
-                    int row = grid.Rows.Add(a.OutputName, a.DiscPath, Path.GetFileName(a.SourcePath), a.Notes, status);
-                    grid.Rows[row].Cells[4].Style.ForeColor = StatusColor(status);
+                    GeneralAssetInfo info = AnalyzeGeneralAsset(a, category);
+                    string status = File.Exists(a.SourcePath) ? (string.IsNullOrWhiteSpace(info.Warning) ? "Ready" : "Check") : "Invalid";
+                    string notes = string.IsNullOrWhiteSpace(a.Notes) ? info.Warning : CombineWarnings(a.Notes, info.Warning);
+                    int row = grid.Rows.Add(info.Kind, info.Usage, info.Folder, a.OutputName, a.DiscPath, Path.GetFileName(a.SourcePath), notes, FormatBytes(FileSizeSafe(a.SourcePath)), status);
+                    grid.Rows[row].Cells[8].Style.ForeColor = StatusColor(status);
+                    if (!string.IsNullOrWhiteSpace(info.Warning)) grid.Rows[row].Cells[6].Style.ForeColor = Warn;
                 }
             }
             UpdateReadyLabels();
+        }
+
+
+        private class GeneralAssetInfo
+        {
+            public string Kind = "Asset";
+            public string Usage = "Unknown replacement";
+            public string Folder = "Unknown";
+            public string Warning = "";
+            public string Details = "";
+            public string SuggestedAction = "Check the target path before exporting.";
+        }
+
+        private GeneralAssetInfo AnalyzeGeneralAsset(AssetFile a, string category)
+        {
+            GeneralAssetInfo info = new GeneralAssetInfo();
+            string output = (a.OutputName ?? "").Replace('\\', '/');
+            string leaf = Path.GetFileName(string.IsNullOrWhiteSpace(output) ? (a.SourcePath ?? "") : output);
+            string lower = (leaf ?? "").ToLowerInvariant();
+            string disc = NormalizeDiscPath(string.IsNullOrWhiteSpace(a.DiscPath) ? DefaultDiscPath(category, output) : a.DiscPath);
+
+            if (category == "Music")
+            {
+                info.Folder = disc.StartsWith("/sound/strm", StringComparison.OrdinalIgnoreCase) ? "/sound/strm" : "/sound";
+                if (lower.EndsWith(".brsar"))
+                {
+                    info.Kind = "Sound archive";
+                    info.Usage = "Global sounds / voices";
+                    info.SuggestedAction = "Only replace revo_kart.brsar when the mod specifically includes one.";
+                }
+                else if (lower.EndsWith("_f.brstm"))
+                {
+                    info.Kind = "Final-lap BRSTM";
+                    info.Usage = "Final lap music";
+                    info.SuggestedAction = "Keep it paired with the matching *_n.brstm normal-lap file.";
+                }
+                else if (lower.EndsWith("_n.brstm"))
+                {
+                    info.Kind = "Normal BRSTM";
+                    info.Usage = "Normal race music";
+                    info.SuggestedAction = "Add or auto-pair the matching *_f.brstm final-lap file.";
+                }
+                else if (lower.EndsWith(".brstm"))
+                {
+                    info.Kind = "BRSTM music";
+                    info.Usage = "Music replacement";
+                    info.SuggestedAction = "Use Music Slot Helper if this should replace a specific track slot.";
+                }
+                else
+                {
+                    info.Kind = "Music asset";
+                    info.Usage = "Unusual music item";
+                    info.SuggestedAction = "Move non-music files to Advanced Files unless you know this target is correct.";
+                }
+
+                if (!lower.EndsWith(".brstm") && !lower.EndsWith(".brsar")) info.Warning = "Music tab normally expects .brstm music or revo_kart.brsar.";
+                else if (lower.EndsWith(".brstm") && !disc.StartsWith("/sound/strm", StringComparison.OrdinalIgnoreCase)) info.Warning = "BRSTM usually targets /sound/strm.";
+                else if (lower.EndsWith(".brsar") && !disc.Equals("/sound/revo_kart.brsar", StringComparison.OrdinalIgnoreCase)) info.Warning = "BRSAR usually targets /sound/revo_kart.brsar.";
+
+                string pair = MusicPairName(leaf);
+                if (!string.IsNullOrWhiteSpace(pair)) info.Details = "Expected pair: " + pair;
+                return info;
+            }
+
+            if (lower.EndsWith(".rel"))
+            {
+                info.Kind = IsStaticRelName(leaf) ? "StaticR REL" : "REL file";
+                info.Usage = IsStaticRelName(leaf) ? "Game code / region behavior" : "Advanced code module";
+                info.Folder = "/rel";
+                info.SuggestedAction = "Use only when the mod author supplies a matching region REL.";
+            }
+            else if (lower.Equals("revo_kart.brsar"))
+            {
+                info.Kind = "Sound archive";
+                info.Usage = "Global sound effects / voices";
+                info.Folder = "/sound";
+                info.SuggestedAction = "Only replace this when the pack intentionally changes voices or sound effects.";
+            }
+            else if (IsKnownUiSzs(leaf))
+            {
+                info.Kind = "UI SZS archive";
+                info.Usage = "Menu, text, icons, UI screens";
+                info.Folder = "/Scene/UI";
+                info.SuggestedAction = "Good for menu/text/icon replacements. Keep the original MKWii filename.";
+            }
+            else if (lower.EndsWith(".szs"))
+            {
+                info.Kind = "SZS archive";
+                info.Usage = disc.StartsWith("/Scene/UI", StringComparison.OrdinalIgnoreCase) ? "UI/archive replacement" : "Generic archive replacement";
+                info.Folder = string.IsNullOrWhiteSpace(disc) ? "Unknown" : ParentDiscFolder(disc);
+                info.SuggestedAction = "Check whether this belongs in Tracks, Characters, or Advanced Files.";
+            }
+            else if (lower.EndsWith(".brres"))
+            {
+                info.Kind = "BRRES model/resource";
+                info.Usage = "Model/texture resource";
+                info.Folder = string.IsNullOrWhiteSpace(disc) ? "Usually inside SZS" : ParentDiscFolder(disc);
+                info.SuggestedAction = "BRRES is often source material inside an SZS; direct replacement is advanced.";
+            }
+            else
+            {
+                info.Kind = "Advanced asset";
+                info.Usage = "Unknown advanced file";
+                info.Folder = string.IsNullOrWhiteSpace(disc) ? "Unknown" : ParentDiscFolder(disc);
+                info.SuggestedAction = "Check the source mod readme for the exact target path.";
+            }
+
+            if (lower.EndsWith(".rel") && !disc.StartsWith("/rel", StringComparison.OrdinalIgnoreCase)) info.Warning = "REL files usually target /rel.";
+            else if (IsKnownUiSzs(leaf) && !disc.StartsWith("/Scene/UI", StringComparison.OrdinalIgnoreCase)) info.Warning = "Known UI SZS usually targets /Scene/UI.";
+            else if (lower.Equals("revo_kart.brsar") && !disc.Equals("/sound/revo_kart.brsar", StringComparison.OrdinalIgnoreCase)) info.Warning = "revo_kart.brsar should target /sound/revo_kart.brsar.";
+            else if (string.IsNullOrWhiteSpace(disc)) info.Warning = "No direct disc target. This may be source-only or incomplete.";
+            return info;
+        }
+
+        private long FileSizeSafe(string path)
+        {
+            try { if (!string.IsNullOrWhiteSpace(path) && File.Exists(path)) return new FileInfo(path).Length; }
+            catch { }
+            return 0;
+        }
+
+        private string MusicPairName(string filename)
+        {
+            if (string.IsNullOrWhiteSpace(filename)) return "";
+            string name = Path.GetFileName(filename);
+            if (name.EndsWith("_n.brstm", StringComparison.OrdinalIgnoreCase)) return name.Substring(0, name.Length - 8) + "_f.brstm";
+            if (name.EndsWith("_f.brstm", StringComparison.OrdinalIgnoreCase)) return name.Substring(0, name.Length - 8) + "_n.brstm";
+            return "";
+        }
+
+        private void ShowMusicReportDialog()
+        {
+            ApplyAssetGridEdits("Music");
+            MessageBox.Show(this, BuildMusicReportText(), "Music File Identification", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            RefreshAssetGrid("Music");
+        }
+
+        private string BuildMusicReportText()
+        {
+            StringBuilder sb = new StringBuilder();
+            sb.AppendLine("Music file report");
+            sb.AppendLine("=================");
+            sb.AppendLine();
+            if (MusicAssets.Count == 0)
+            {
+                sb.AppendLine("No music files have been added yet.");
+                return sb.ToString();
+            }
+            int normal = 0, final = 0, other = 0, brsar = 0, missing = 0;
+            foreach (AssetFile a in MusicAssets)
+            {
+                GeneralAssetInfo info = AnalyzeGeneralAsset(a, "Music");
+                if (!File.Exists(a.SourcePath)) missing++;
+                if (info.Kind.StartsWith("Normal")) normal++;
+                else if (info.Kind.StartsWith("Final")) final++;
+                else if (info.Kind.Contains("archive")) brsar++;
+                else other++;
+                sb.AppendLine(info.Kind + " - " + Path.GetFileName(a.OutputName));
+                sb.AppendLine("  What it changes: " + info.Usage);
+                sb.AppendLine("  MKWii folder: " + info.Folder);
+                sb.AppendLine("  Target: " + (string.IsNullOrWhiteSpace(a.DiscPath) ? DefaultDiscPath("Music", a.OutputName) : a.DiscPath));
+                sb.AppendLine("  Source: " + Path.GetFileName(a.SourcePath) + "  " + FormatBytes(FileSizeSafe(a.SourcePath)));
+                sb.AppendLine("  Suggested action: " + info.SuggestedAction);
+                string pair = MusicPairName(Path.GetFileName(a.OutputName));
+                if (!string.IsNullOrWhiteSpace(pair))
+                {
+                    bool hasPair = MusicAssets.Any(x => Path.GetFileName(x.OutputName).Equals(pair, StringComparison.OrdinalIgnoreCase));
+                    sb.AppendLine("  Pair: " + pair + "  " + (hasPair ? "OK" : "MISSING"));
+                }
+                if (!string.IsNullOrWhiteSpace(info.Warning)) sb.AppendLine("  Check: " + info.Warning);
+                sb.AppendLine();
+            }
+            sb.AppendLine("Summary");
+            sb.AppendLine("-------");
+            sb.AppendLine("Normal lap files: " + normal);
+            sb.AppendLine("Final lap files: " + final);
+            sb.AppendLine("Sound archives: " + brsar);
+            sb.AppendLine("Other music entries: " + other);
+            sb.AppendLine("Missing source files: " + missing);
+            return sb.ToString();
+        }
+
+        private void AutoPairMusicAssets()
+        {
+            ApplyAssetGridEdits("Music");
+            int added = 0;
+            List<AssetFile> snapshot = MusicAssets.ToList();
+            foreach (AssetFile a in snapshot)
+            {
+                string leaf = Path.GetFileName(a.OutputName);
+                if (string.IsNullOrWhiteSpace(leaf) || !leaf.EndsWith("_n.brstm", StringComparison.OrdinalIgnoreCase)) continue;
+                string final = SuggestMusicFinalFromNormal(leaf);
+                if (string.IsNullOrWhiteSpace(final)) continue;
+                if (MusicAssets.Any(x => Path.GetFileName(x.OutputName).Equals(final, StringComparison.OrdinalIgnoreCase))) continue;
+                AddOrReplaceMusicAsset(a.SourcePath, final);
+                AssetFile created = MusicAssets.FirstOrDefault(x => Path.GetFileName(x.OutputName).Equals(final, StringComparison.OrdinalIgnoreCase));
+                if (created != null) created.Notes = "Auto-paired from " + leaf + "; replace source with a true final-lap BRSTM if you have one.";
+                added++;
+            }
+            RefreshAssetGrid("Music");
+            MessageBox.Show(this, added == 0 ? "No missing final-lap pairs were found from *_n.brstm entries." : "Added " + added + " final-lap pair placeholder(s).", "Auto Pair Music", MessageBoxButtons.OK, MessageBoxIcon.Information);
+        }
+
+        private void ShowAdvancedFileReportDialog()
+        {
+            ApplyAssetGridEdits("UI / REL Assets");
+            StringBuilder sb = new StringBuilder();
+            sb.AppendLine("Advanced file identification");
+            sb.AppendLine("============================");
+            sb.AppendLine();
+            if (UiRelAssets.Count == 0)
+            {
+                sb.AppendLine("No advanced files have been added yet.");
+            }
+            foreach (AssetFile a in UiRelAssets)
+            {
+                GeneralAssetInfo info = AnalyzeGeneralAsset(a, "UI / REL Assets");
+                sb.AppendLine(info.Kind + " - " + Path.GetFileName(a.OutputName));
+                sb.AppendLine("  What it changes: " + info.Usage);
+                sb.AppendLine("  MKWii folder: " + info.Folder);
+                sb.AppendLine("  Target: " + (string.IsNullOrWhiteSpace(a.DiscPath) ? DefaultDiscPath("UI / REL Assets", a.OutputName) : a.DiscPath));
+                sb.AppendLine("  Source: " + Path.GetFileName(a.SourcePath) + "  " + FormatBytes(FileSizeSafe(a.SourcePath)));
+                sb.AppendLine("  Suggested action: " + info.SuggestedAction);
+                if (!string.IsNullOrWhiteSpace(info.Warning)) sb.AppendLine("  Check: " + info.Warning);
+                sb.AppendLine();
+            }
+            MessageBox.Show(this, sb.ToString(), "Advanced File Identification", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            RefreshAssetGrid("UI / REL Assets");
         }
 
         private class CharacterAssetInfo
@@ -3267,14 +4055,14 @@ namespace MKWiiPackMaker
 
         private void ImportExistingPackDialog()
         {
-            DialogResult ask = MessageBox.Show("Import from an archive file?\n\nChoose Yes for ZIP/RAR, No for an extracted folder.", "Import Existing HNS Pack", MessageBoxButtons.YesNoCancel, MessageBoxIcon.Question);
+            DialogResult ask = MessageBox.Show("Import from an archive file?\n\nChoose Yes for ZIP, No for an extracted folder.", "Import Existing HNS Pack", MessageBoxButtons.YesNoCancel, MessageBoxIcon.Question);
             if (ask == DialogResult.Cancel) return;
             string importRoot = "";
             if (ask == DialogResult.Yes)
             {
                 OpenFileDialog ofd = new OpenFileDialog();
                 ofd.Title = "Choose HNS pack archive";
-                ofd.Filter = "Archives (*.zip;*.rar)|*.zip;*.rar|ZIP archive (*.zip)|*.zip|RAR archive (*.rar)|*.rar|All files (*.*)|*.*";
+                ofd.Filter = "ZIP archive (*.zip)|*.zip";
                 if (ofd.ShowDialog(this) != DialogResult.OK) return;
                 string imports = Path.Combine(AppRoot, "imports");
                 Directory.CreateDirectory(imports);
@@ -3295,14 +4083,14 @@ namespace MKWiiPackMaker
 
         private void ImportCharacterPackDialog()
         {
-            DialogResult ask = MessageBox.Show("Import a custom character pack from an archive?\n\nChoose Yes for ZIP/RAR, No for an extracted folder.", "Import Character Pack", MessageBoxButtons.YesNoCancel, MessageBoxIcon.Question);
+            DialogResult ask = MessageBox.Show("Import a custom character pack from an archive?\n\nChoose Yes for ZIP, No for an extracted folder.", "Import Character Pack", MessageBoxButtons.YesNoCancel, MessageBoxIcon.Question);
             if (ask == DialogResult.Cancel) return;
             string importRoot = "";
             if (ask == DialogResult.Yes)
             {
                 OpenFileDialog ofd = new OpenFileDialog();
                 ofd.Title = "Choose custom character pack archive";
-                ofd.Filter = "Archives (*.zip;*.rar)|*.zip;*.rar|ZIP archive (*.zip)|*.zip|RAR archive (*.rar)|*.rar|All files (*.*)|*.*";
+                ofd.Filter = "ZIP archive (*.zip)|*.zip";
                 if (ofd.ShowDialog(this) != DialogResult.OK) return;
                 string imports = Path.Combine(AppRoot, "imports");
                 Directory.CreateDirectory(imports);
@@ -3328,19 +4116,12 @@ namespace MKWiiPackMaker
         private void ExtractArchive(string archivePath, string destination)
         {
             string ext = Path.GetExtension(archivePath).ToLowerInvariant();
-            if (ext == ".zip")
+            if (ext != ".zip")
             {
-                ZipFile.ExtractToDirectory(archivePath, destination, true);
-                return;
+                throw new NotSupportedException("Only ZIP archives are supported directly. For RAR/7z packs, extract them first and choose the extracted folder option.");
             }
 
-            using (var archive = ArchiveFactory.Open(archivePath))
-            {
-                foreach (var entry in archive.Entries.Where(e => !e.IsDirectory))
-                {
-                    entry.WriteToDirectory(destination, new ExtractionOptions { ExtractFullPath = true, Overwrite = true });
-                }
-            }
+            ZipFile.ExtractToDirectory(archivePath, destination, true);
         }
 
         private void ImportExistingPack(string root)
@@ -3807,6 +4588,220 @@ namespace MKWiiPackMaker
             return v.ToString(i == 0 ? "0" : "0.0") + " " + units[i];
         }
 
+
+        private void UpdateExportSizeEstimate(bool showMessage)
+        {
+            try
+            {
+                SaveMetadataFromFields();
+                ApplyGridEdits();
+                ApplyAssetGridEdits("Music");
+                ApplyAssetGridEdits("Characters");
+                ApplyAssetGridEdits("UI / REL Assets");
+                string summary = EstimateExportSizeSummary();
+                if (ExportEstimateLabel != null) ExportEstimateLabel.Text = summary;
+                if (showMessage) MessageBox.Show(this, BuildExportSizeReport(), "Estimated Final Pack Size", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            }
+            catch (Exception ex)
+            {
+                if (showMessage) MessageBox.Show(this, "Could not estimate size:\n\n" + ex.Message, "Estimate Size", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
+        }
+
+        private string EstimateExportSizeSummary()
+        {
+            long bytes = EstimateFinalPackSizeBytes();
+            return bytes <= 0 ? "No export files selected yet" : FormatBytes(bytes) + " estimated folder size";
+        }
+
+        private long EstimateFinalPackSizeBytes()
+        {
+            long total = 0;
+            bool copyD = CopyMultiplayerCheck != null ? CopyMultiplayerCheck.Checked : CopyMultiplayerCourseCopies;
+            foreach (TrackSlotInfo slot in Slots)
+            {
+                if (GetSlotStatus(slot) != "Ready") continue;
+                long size = FileSizeSafe(slot.SourcePath);
+                total += size;
+                if (copyD) total += size;
+            }
+            foreach (AssetFile a in MusicAssets) if (File.Exists(a.SourcePath)) total += FileSizeSafe(a.SourcePath);
+            foreach (AssetFile a in UiRelAssets) if (File.Exists(a.SourcePath)) total += FileSizeSafe(a.SourcePath);
+            foreach (AssetFile a in CharacterAssets)
+            {
+                if (!File.Exists(a.SourcePath)) continue;
+                if (ShouldSkipFullCharacterUiAsset(a)) continue;
+                string disc = NormalizeDiscPath(string.IsNullOrWhiteSpace(a.DiscPath) ? DefaultDiscPath("Characters", a.OutputName) : a.DiscPath);
+                if (string.IsNullOrWhiteSpace(disc) && (a.OutputName ?? "").ToLowerInvariant().StartsWith("inject/")) continue;
+                total += FileSizeSafe(a.SourcePath);
+            }
+            total += EstimateAutoPatchedUiBytes();
+            total += 256 * 1024; // XML, readme, manifests, reports, and filesystem overhead.
+            return total;
+        }
+
+        private long EstimateAutoPatchedUiBytes()
+        {
+            long total = 0;
+            bool needsCup = CupIconPaths.Values.Any(x => !string.IsNullOrWhiteSpace(x) && File.Exists(x));
+            bool needsNames = Slots.Any(x => !string.IsNullOrWhiteSpace(x.CustomName) && !string.Equals(x.CustomName.Trim(), x.TrackName, StringComparison.OrdinalIgnoreCase));
+            bool needsCharacterUi = CharacterAssets.Any(a => (a.OutputName ?? "").Replace('\\','/').ToLowerInvariant().Contains("inject/img") || Path.GetExtension(a.SourcePath ?? "").Equals(".png", StringComparison.OrdinalIgnoreCase) || Path.GetExtension(a.SourcePath ?? "").Equals(".tpl", StringComparison.OrdinalIgnoreCase));
+            if (!needsCup && !needsNames && !needsCharacterUi) return 0;
+
+            string baseRoot = Path.Combine(AppRoot, "base_files");
+            List<string> names = new List<string>();
+            if (needsCup || needsCharacterUi) names.AddRange(UiIconBaseFiles(PatchIncludeAward));
+            if (needsNames)
+            {
+                string suffix = string.IsNullOrWhiteSpace(PatchLanguage) ? "U" : PatchLanguage.Substring(0, 1);
+                names.AddRange(UiLanguageFiles(suffix, PatchIncludeAward));
+                names.AddRange(UiIconBaseFiles(PatchIncludeAward));
+            }
+            foreach (string name in names.Distinct(StringComparer.OrdinalIgnoreCase))
+            {
+                string file = FindBaseFileByName(baseRoot, name);
+                if (File.Exists(file)) total += FileSizeSafe(file);
+            }
+            return total;
+        }
+
+
+        private string FindBaseFileByName(string baseRoot, string fileName)
+        {
+            try
+            {
+                if (string.IsNullOrWhiteSpace(baseRoot) || string.IsNullOrWhiteSpace(fileName) || !Directory.Exists(baseRoot)) return "";
+                string directUi = Path.Combine(baseRoot, "Scene", "UI", fileName);
+                if (File.Exists(directUi)) return directUi;
+                string lang = Path.Combine(baseRoot, "Scene", "UI", "Language", fileName);
+                if (File.Exists(lang)) return lang;
+                string found = Directory.GetFiles(baseRoot, fileName, SearchOption.AllDirectories).FirstOrDefault();
+                return found ?? "";
+            }
+            catch { return ""; }
+        }
+
+        private string BuildExportSizeReport()
+        {
+            StringBuilder sb = new StringBuilder();
+            sb.AppendLine("Estimated final pack size");
+            sb.AppendLine("=========================");
+            sb.AppendLine();
+            long tracks = Slots.Where(x => GetSlotStatus(x) == "Ready").Sum(x => FileSizeSafe(x.SourcePath));
+            long music = MusicAssets.Where(x => File.Exists(x.SourcePath)).Sum(x => FileSizeSafe(x.SourcePath));
+            long chars = CharacterAssets.Where(x => File.Exists(x.SourcePath) && !ShouldSkipFullCharacterUiAsset(x)).Sum(x => FileSizeSafe(x.SourcePath));
+            long ui = UiRelAssets.Where(x => File.Exists(x.SourcePath)).Sum(x => FileSizeSafe(x.SourcePath));
+            long autoUi = EstimateAutoPatchedUiBytes();
+            bool copyD = CopyMultiplayerCheck != null ? CopyMultiplayerCheck.Checked : CopyMultiplayerCourseCopies;
+            if (copyD) tracks *= 2;
+            sb.AppendLine("Tracks: " + FormatBytes(tracks));
+            sb.AppendLine("Music: " + FormatBytes(music));
+            sb.AppendLine("Characters: " + FormatBytes(chars));
+            sb.AppendLine("Advanced/UI/REL assets: " + FormatBytes(ui));
+            sb.AppendLine("Auto-patched UI estimate: " + FormatBytes(autoUi));
+            sb.AppendLine("Reports/XML overhead: about 0.3 MB");
+            sb.AppendLine();
+            sb.AppendLine("Total estimate: " + FormatBytes(EstimateFinalPackSizeBytes()));
+            sb.AppendLine();
+            sb.AppendLine("Note: this is a folder-size estimate before compression. The final ZIP release may be smaller.");
+            return sb.ToString();
+        }
+
+        private void ShowExportPreviewDialog()
+        {
+            SaveMetadataFromFields();
+            ApplyGridEdits();
+            ApplyAssetGridEdits("Music");
+            ApplyAssetGridEdits("Characters");
+            ApplyAssetGridEdits("UI / REL Assets");
+            ShowLargeTextDialog("Export Preview / Dry Run", BuildExportPreviewText());
+        }
+
+        private string BuildExportPreviewText()
+        {
+            StringBuilder sb = new StringBuilder();
+            sb.AppendLine("Export preview / dry run");
+            sb.AppendLine("========================");
+            sb.AppendLine();
+            sb.AppendLine("Pack option name: " + (string.IsNullOrWhiteSpace(PackName) ? HumanName(PackId) : PackName));
+            sb.AppendLine("Pack folder ID: " + SafeId(PackId));
+            sb.AppendLine("Estimated size: " + FormatBytes(EstimateFinalPackSizeBytes()));
+            sb.AppendLine();
+            sb.AppendLine("Tracks");
+            sb.AppendLine("------");
+            foreach (TrackSlotInfo slot in Slots.Where(x => GetSlotStatus(x) == "Ready"))
+                sb.AppendLine("/Race/Course/" + slot.GameFile + "  <=  " + Path.GetFileName(slot.SourcePath) + (string.IsNullOrWhiteSpace(slot.CustomName) ? "" : "  [name: " + slot.CustomName + "]"));
+            sb.AppendLine();
+            sb.AppendLine("Music");
+            sb.AppendLine("-----");
+            foreach (AssetFile a in MusicAssets.Where(x => File.Exists(x.SourcePath)))
+                sb.AppendLine((string.IsNullOrWhiteSpace(a.DiscPath) ? DefaultDiscPath("Music", a.OutputName) : a.DiscPath) + "  <=  " + Path.GetFileName(a.SourcePath));
+            sb.AppendLine();
+            sb.AppendLine("Characters");
+            sb.AppendLine("----------");
+            foreach (AssetFile a in CharacterAssets.Where(x => File.Exists(x.SourcePath)))
+            {
+                if (ShouldSkipFullCharacterUiAsset(a)) continue;
+                string disc = CorrectKnownCharacterDiscPath(NormalizeDiscPath(string.IsNullOrWhiteSpace(a.DiscPath) ? DefaultDiscPath("Characters", a.OutputName) : a.DiscPath), a.OutputName);
+                if (string.IsNullOrWhiteSpace(disc)) continue;
+                CharacterAssetInfo info = AnalyzeCharacterAsset(a);
+                sb.AppendLine(disc + "  <=  " + Path.GetFileName(a.SourcePath) + "  [" + info.CharacterName + " / " + info.FileType + "]");
+            }
+            sb.AppendLine();
+            sb.AppendLine("Advanced UI / REL");
+            sb.AppendLine("-----------------");
+            foreach (AssetFile a in UiRelAssets.Where(x => File.Exists(x.SourcePath)))
+                sb.AppendLine((string.IsNullOrWhiteSpace(a.DiscPath) ? DefaultDiscPath("UI / REL Assets", a.OutputName) : a.DiscPath) + "  <=  " + Path.GetFileName(a.SourcePath));
+            sb.AppendLine();
+            sb.AppendLine("Automatic patching that may happen during export");
+            sb.AppendLine("-----------------------------------------------");
+            sb.AppendLine("Cup icons selected: " + CupIconPaths.Values.Count(x => !string.IsNullOrWhiteSpace(x) && File.Exists(x)));
+            sb.AppendLine("Custom track/cup names: " + Slots.Count(x => !string.IsNullOrWhiteSpace(x.CustomName) && !string.Equals(x.CustomName.Trim(), x.TrackName, StringComparison.OrdinalIgnoreCase)));
+            sb.AppendLine("Character UI/Driver source files: " + CharacterAssets.Count(x => (x.OutputName ?? "").ToLowerInvariant().StartsWith("inject/")));
+            return sb.ToString();
+        }
+
+        private void ShowRiivolutionXmlPreviewDialog()
+        {
+            SaveMetadataFromFields();
+            ApplyGridEdits();
+            ApplyAssetGridEdits("Music");
+            ApplyAssetGridEdits("Characters");
+            ApplyAssetGridEdits("UI / REL Assets");
+            ShowLargeTextDialog("Riivolution XML Preview", BuildRiivolutionXmlText(Path.Combine(AppRoot, "Data", "XmlPreview")));
+        }
+
+        private void ShowLargeTextDialog(string title, string text)
+        {
+            Form dialog = new Form();
+            dialog.Text = title;
+            dialog.StartPosition = FormStartPosition.CenterParent;
+            dialog.Size = new Size(900, 650);
+            dialog.MinimumSize = new Size(650, 420);
+            dialog.BackColor = Bg;
+            RichTextBox box = new RichTextBox();
+            box.Dock = DockStyle.Fill;
+            box.ReadOnly = true;
+            box.BorderStyle = BorderStyle.None;
+            box.BackColor = Color.FromArgb(10, 13, 20);
+            box.ForeColor = TextMain;
+            box.Font = new Font("Consolas", 10f);
+            box.Text = text;
+            dialog.Controls.Add(box);
+            FlowLayoutPanel bottom = new FlowLayoutPanel();
+            bottom.Dock = DockStyle.Bottom;
+            bottom.Height = 58;
+            bottom.FlowDirection = FlowDirection.RightToLeft;
+            bottom.Padding = new Padding(0, 10, 10, 8);
+            bottom.BackColor = Card;
+            Button close = CreateActionButton("Close", Accent, delegate { dialog.Close(); });
+            Button copy = CreateActionButton("Copy", AccentGreen, delegate { try { Clipboard.SetText(box.Text); } catch { } });
+            bottom.Controls.Add(close);
+            bottom.Controls.Add(copy);
+            dialog.Controls.Add(bottom);
+            dialog.ShowDialog(this);
+        }
+
         private bool ValidatePack(bool showMessage)
         {
             ApplyGridEdits();
@@ -3968,7 +4963,7 @@ namespace MKWiiPackMaker
                     }
                 }
                 catch { }
-                MessageBox.Show(this, "Export failed:\n\n" + ex.Message, "Export Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                MessageBox.Show(this, "Export failed:\n\n" + ex.Message + "\n\n" + ExplainExportError(ex.Message), "Export Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
             finally
             {
@@ -4182,6 +5177,12 @@ namespace MKWiiPackMaker
         {
             string xmlDir = Path.Combine(root, "riivolution");
             Directory.CreateDirectory(xmlDir);
+            string patchId = SafeId(PackId);
+            File.WriteAllText(Path.Combine(xmlDir, patchId + ".xml"), BuildRiivolutionXmlText(root), Encoding.UTF8);
+        }
+
+        private string BuildRiivolutionXmlText(string root)
+        {
             string id = RegionId();
             string patchId = SafeId(PackId);
             string externalBase = CommunityExternalBase();
@@ -4255,11 +5256,10 @@ namespace MKWiiPackMaker
                 sb.AppendLine("    <folder external=\"" + EscapeXml(externalBase) + "/Tracks\" disc=\"/Race/Course\" />");
                 sb.AppendLine("    <folder external=\"" + EscapeXml(externalBase) + "/Music\" disc=\"/sound/strm\" />");
                 sb.AppendLine("    <folder external=\"" + EscapeXml(externalBase) + "/Menu\" disc=\"/Scene/UI\" />");
-                // Character files stay mapped one-by-one. Broad character folder patches are unsafe because Driver.szs, *-allkart.szs, kart SZS, UI SZS, and BRSAR files belong to different disc paths.
             }
             sb.AppendLine("  </patch>");
             sb.AppendLine("</wiidisc>");
-            File.WriteAllText(Path.Combine(xmlDir, patchId + ".xml"), sb.ToString(), Encoding.UTF8);
+            return sb.ToString();
         }
 
         private string CommunityExternalForUiRel(string outName)
