@@ -1,7 +1,6 @@
-[README.md](https://github.com/user-attachments/files/29169506/README.md)
-# MKWii Pack Maker V11
+# MKWii Pack Maker V12.1.0
 
-**MKWii Pack Maker** is a Windows desktop tool for creating Mario Kart Wii HNS / Riivolution custom packs with a simple workflow.
+**MKWii Pack Maker** is a Windows desktop tool for creating **Mario Kart Wii HNS / Riivolution custom packs** with a simple workflow.
 
 It helps pack makers:
 
@@ -11,35 +10,18 @@ It helps pack makers:
 4. Add custom BRSTM music.
 5. Pick optional custom cup icons.
 6. Auto-name cups from custom cup icons.
-7. Export a ready-to-use HNS / Riivolution pack for Dolphin or Riivolution.
+7. Preview export paths and Riivolution XML before building.
+8. Export a ready-to-use HNS / Riivolution pack for Wii, Wii U, Dolphin, or Riivolution-style setups.
 
 The goal is to make Mario Kart Wii Hide and Seek pack creation easier without manually editing every folder, SZS archive, BMG text file, or Riivolution XML.
 
 ---
 
-## Important Legal Notice
-
-This tool does **not** include Nintendo game files.
-
-Users must provide their own legally obtained Mario Kart Wii dump, such as their own `.wbfs` or `.iso`, or their own already extracted MKWii files.
-
-Do **not** upload or share Nintendo base files such as:
-
-- `.szs`
-- `.brsar`
-- `.brres`
-- extracted `Scene`, `Race`, or `Sound` game folders
-- `.wbfs` or `.iso` game images
-
-The public GitHub repository should only include an empty `base_files` folder with instructions.
-
----
-
 ## Requirements
 
-- Windows 10/11
+- Windows 10/11, might work on MacOS
 - .NET 8 Desktop Runtime for the small EXE build
-- A legally obtained Mario Kart Wii WBFS/ISO or extracted Mario Kart Wii base files
+- A legally obtained Mario Kart Wii disc image or extracted Mario Kart Wii base files
 
 The build package includes the required Wiimm tools in the `tools` folder:
 
@@ -52,63 +34,26 @@ tools/wimgt.exe
 
 ---
 
-## First-Time Setup
-
-### Recommended Method: Use the Built-In Extractor
-
-1. Open `MKWiiPackMaker.exe`.
-2. Go to **Setup**.
-3. Click **Extract base files from WBFS/ISO**.
-4. Select your legally dumped Mario Kart Wii `.wbfs` or `.iso`.
-5. Wait for the progress window to finish.
-6. The app copies only the required base folders into `base_files`.
-
-The app extracts only the required folders:
-
-```text
-base_files/
-├─ Scene/
-│  ├─ UI/
-│  └─ Model/
-│     └─ Kart/
-├─ Race/
-│  ├─ Kart/
-│  └─ Course/
-└─ Sound/
-```
-
-The original WBFS/ISO is not modified.
-
-### Manual Method
-
-If you already extracted your game, copy these folders into `base_files`:
-
-```text
-Scene\UI      -> base_files\Scene\UI
-Scene\Model   -> base_files\Scene\Model
-Race\Kart     -> base_files\Race\Kart
-Race\Course   -> base_files\Race\Course
-Sound          -> base_files\Sound
-```
-
-The software uses these files as clean base copies. It copies them into a temporary working folder before patching, so the original `base_files` are not edited.
-
----
-
 ## How to Use
 
 1. Open `MKWiiPackMaker.exe`.
 2. Complete **Setup** by extracting or copying your base files.
 3. Go to **Tracks** and add custom `.szs` tracks.
-4. Set custom track names if needed.
-5. Go to **Characters** and import character packs.
-6. Go to **Music** and use the Music Slot Helper to assign normal/final-lap BRSTM files.
-7. Go to **Cup Icons** and assign custom icons only for the cups you want to change.
-8. Go to **Dashboard** and set:
-   - Pack Name
-   - Pack ID / folder name
-   - Riivolution Option Name
-9. Go to **Export** and build the HNS / Riivolution pack.
+4. Use **Validate Track SZS** to check for common course internals like `course.kmp`, `course.kcl`, and `course_model.brres`.
+5. Set custom track names if needed.
+6. Go to **Characters** and import character packs.
+7. Use **Check Conflicts** and **Character Summary** to find duplicate targets or incomplete character packs.
+8. Go to **Music** and use the Music Slot Helper to assign normal/final-lap BRSTM files.
+9. Use **Auto Pair Music** or **Music Report** to identify missing normal/final-lap pairs.
+10. Go to **Advanced Files** for UI, REL, BRSAR, and other advanced assets. Use **Identify Files** to understand targets.
+11. Go to **Cup Icons** and assign custom icons only for cups you want to change.
+12. Go to **Dashboard** and set:
+    - Pack Name
+    - Pack ID / folder name
+    - Riivolution Option Name
+13. Go to **Export**.
+14. Use **Preview Export**, **XML Preview**, and **Estimate Size**.
+15. Click **Build Export** to build the HNS / Riivolution pack.
 
 Empty cup icon slots keep the original Mario Kart Wii cup icon.
 
@@ -117,6 +62,7 @@ Empty cup icon slots keep the original Mario Kart Wii cup icon.
 ## What Works
 
 - Custom track replacement
+- Track SZS validation
 - Custom track names through BMG patching
 - Custom cup icons through UI SZS patching
 - Automatic cup names from selected cup icon filenames
@@ -124,15 +70,75 @@ Empty cup icon slots keep the original Mario Kart Wii cup icon.
 - Character select model support
 - Character tab character detection and icons
 - Duplicate character target conflict checker
+- Character pack summary / completeness report
 - Character sounds through `revo_kart.brsar`
 - Custom BRSTM music support
 - Music slot helper for normal/final-lap music
-- Built-in WBFS/ISO base file extractor
+- Auto music pair helper
+- Music file identification report
+- Advanced file identification for SZS / REL / BRSAR / BRRES files
+- Built-in base file extractor for ISO, WBFS, RVZ, GCZ, WIA, WDF, CISO, and NKit ISO inputs
 - Export progress window
-- Riivolution / Dolphin-ready export
+- Export preview / dry run
+- Riivolution XML preview
+- Estimated final pack folder size
+- Riivolution-ready export for Wii, Wii U, and emulator workflows
 - Open last exported pack folder
 - Project cleanup tool
+- Public release safety check
 - Logs for debugging
+
+---
+
+## Export Notes
+
+The tool exports game-loadable files only. Loose PNG/TXT files are not treated as final MKWii files unless they are patched into real SZS/BMG/UI files.
+
+The export can take time because the app may need to:
+
+- copy clean base SZS files
+- patch character UI sources into real UI SZS archives
+- patch cup icons into menu UI archives
+- patch track and cup names into BMG text
+- rebuild SZS archives with Wiimm tools
+- write Riivolution XML and reports
+
+---
+
+## GitHub / Publishing Notes
+
+Do **not** commit or upload:
+
+```text
+base_files/Scene/
+base_files/Race/
+base_files/Sound/
+Data/
+logs/
+release/
+release_portable/
+bin/
+obj/
+*_hns_riivolution/
+*.wbfs
+*.iso
+*.rvz
+*.gcz
+*.wia
+*.wdf
+*.ciso
+*.nkit.iso
+```
+
+Keep only:
+
+```text
+base_files/README.txt
+```
+
+Built release ZIPs should be uploaded under **GitHub Releases**, not committed as source files.
+
+If `assets/character_icons` contains Mario Kart character artwork, only publish it if you have the right to share those files. Otherwise, remove them from the public repo and let users add icons locally.
 
 ---
 
@@ -154,36 +160,17 @@ When reporting issues, include:
 
 ---
 
-## GitHub / Publishing Notes
-
-Do not commit or upload:
-
-```text
-base_files/Scene/
-base_files/Race/
-base_files/Sound/
-Data/
-logs/
-release/
-release_portable/
-bin/
-obj/
-*_hns_riivolution/
-*.wbfs
-*.iso
-```
-
-Keep only:
-
-```text
-base_files/README.txt
-```
-
-Built release ZIPs should be uploaded under **GitHub Releases**, not committed as source files unless intentionally included.
-
----
-
 ## Credits
 
 - Wiimm for Wiimms SZS / ISO toolsets
 - HNS community testers and pack creators
+
+---
+
+## V12.1.0 Update
+
+V12.1.0 adds expanded game image extraction support. The Setup extractor now accepts ISO, WBFS, RVZ, GCZ, WIA, WDF, CISO, and NKit ISO inputs.
+
+It also updates the README, release notes, and safety checks so public releases clearly warn against uploading game image files or extracted Nintendo base files.
+
+Dolphin auto-install is not included because the tool is intended to support Wii, Wii U, and Riivolution-style workflows.
