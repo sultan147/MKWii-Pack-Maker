@@ -1,0 +1,7 @@
+Put Wiimms tools here for automatic patching:
+
+wszst.exe  - extracts/rebuilds SZS archives
+wbmgt.exe  - decodes/encodes Common.bmg for track/character names
+wimgt.exe  - needed for automatic texture/image injection in later versions
+
+You can also put them in tools/bin/.

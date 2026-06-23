@@ -1,0 +1,14 @@
+{
+  "PackName": "Example HNS Pack",
+  "PackId": "example_hns_pack",
+  "Author": "Your Name",
+  "Version": "1.0.0",
+  "Description": "Example project file for MKWii Pack Maker 4.8.0.",
+  "CopyMultiplayerCourseCopies": false,
+  "IncludeCommunityFallbackFolderPatch": true,
+  "Tracks": [],
+  "Music": [],
+  "Characters": [],
+  "UiRelAssets": [],
+  "CupIcons": {}
+}

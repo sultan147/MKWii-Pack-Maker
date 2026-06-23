@@ -1,0 +1,31 @@
+# Build outputs
+bin/
+obj/
+release/
+release_portable/
+*.pdb
+
+# Local app/runtime data
+Data/
+logs/
+
+# User-provided Nintendo/MKWii files - never commit these
+base_files/Scene/
+base_files/Race/
+base_files/Sound/
+*.wbfs
+*.iso
+*.ciso
+*.wia
+*.rvz
+
+# Exported packs
+*_hns_riivolution/
+exports/
+Export/
+Output/
+
+# Temporary folders
+Temp/
+temp/
+*_temp/
