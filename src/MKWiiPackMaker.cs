@@ -166,6 +166,8 @@ namespace MKWiiPackMaker
         private readonly Color AccentGreen = Color.FromArgb(42, 176, 147);
         private readonly Color Danger = Color.FromArgb(246, 91, 91);
         private readonly Color Warn = Color.FromArgb(255, 194, 87);
+        private readonly Color NavHover = Color.FromArgb(24, 30, 43);
+        private readonly Color FieldFocus = Color.FromArgb(22, 28, 40);
 
         private string AppRoot = Application.StartupPath;
         private string ProjectFile = "";
@@ -413,12 +415,17 @@ namespace MKWiiPackMaker
             btn.Margin = new Padding(0, 0, 0, 7);
             btn.FlatStyle = FlatStyle.Flat;
             btn.FlatAppearance.BorderSize = 0;
+            btn.FlatAppearance.MouseOverBackColor = NavHover;
+            btn.FlatAppearance.MouseDownBackColor = Accent;
             btn.BackColor = Sidebar;
             btn.ForeColor = TextMuted;
             btn.Font = new Font("Segoe UI Semibold", 10.3f, FontStyle.Bold);
             btn.TextAlign = ContentAlignment.MiddleLeft;
             btn.Padding = new Padding(30, 0, 0, 0);
             btn.Cursor = Cursors.Hand;
+            btn.UseVisualStyleBackColor = false;
+            btn.AccessibleName = text + " page";
+            btn.AccessibleDescription = "Open the " + text + " page";
             NavButtons.Add(btn);
             return btn;
         }
@@ -430,6 +437,8 @@ namespace MKWiiPackMaker
                 bool active = btn.Text == text;
                 btn.BackColor = active ? Accent : Sidebar;
                 btn.ForeColor = active ? Color.White : TextMuted;
+                btn.FlatAppearance.MouseOverBackColor = active ? Blend(Accent, Color.White, 0.10f) : NavHover;
+                btn.FlatAppearance.MouseDownBackColor = active ? Blend(Accent, Color.Black, 0.10f) : Accent;
             }
         }
 
@@ -460,6 +469,7 @@ namespace MKWiiPackMaker
             HeaderTitle.Font = new Font("Segoe UI Semibold", 22f, FontStyle.Bold);
             HeaderTitle.Location = new Point(34, 21);
             HeaderTitle.Size = new Size(720, 42);
+            HeaderTitle.AutoEllipsis = true;
             header.Controls.Add(HeaderTitle);
 
             HeaderSubtitle = new Label();
@@ -467,6 +477,7 @@ namespace MKWiiPackMaker
             HeaderSubtitle.Font = new Font("Segoe UI", 10.5f);
             HeaderSubtitle.Location = new Point(36, 67);
             HeaderSubtitle.Size = new Size(850, 28);
+            HeaderSubtitle.AutoEllipsis = true;
             header.Controls.Add(HeaderSubtitle);
 
             HeaderReadyLabel = new Label();
@@ -483,14 +494,18 @@ namespace MKWiiPackMaker
             HeaderVersionLabel.Anchor = AnchorStyles.Top | AnchorStyles.Right;
             HeaderVersionLabel.Size = new Size(320, 24);
             HeaderVersionLabel.TextAlign = ContentAlignment.MiddleRight;
-            HeaderVersionLabel.Text = AppVersion;
+            HeaderVersionLabel.Text = "Version " + AppVersion;
             header.Controls.Add(HeaderVersionLabel);
 
             header.Resize += delegate
             {
-                HeaderReadyLabel.Left = Math.Max(560, header.ClientSize.Width - HeaderReadyLabel.Width - 36);
+                int statusLeft = Math.Max(420, header.ClientSize.Width - HeaderReadyLabel.Width - 36);
+                int copyWidth = Math.Max(300, statusLeft - 58);
+                HeaderTitle.Width = copyWidth;
+                HeaderSubtitle.Width = copyWidth;
+                HeaderReadyLabel.Left = statusLeft;
                 HeaderReadyLabel.Top = 32;
-                HeaderVersionLabel.Left = Math.Max(560, header.ClientSize.Width - HeaderVersionLabel.Width - 36);
+                HeaderVersionLabel.Left = statusLeft;
                 HeaderVersionLabel.Top = 64;
             };
 
@@ -1114,6 +1129,7 @@ namespace MKWiiPackMaker
 
             RoundedPanel metaCard = CreateCard();
             metaCard.Padding = new Padding(26);
+            metaCard.Margin = new Padding(0, 0, 12, 0);
             layout.Controls.Add(metaCard, 0, 0);
 
             TableLayoutPanel meta = new TableLayoutPanel();
@@ -1155,36 +1171,52 @@ namespace MKWiiPackMaker
             actions.Controls.Add(CreateActionButton("Import HNS Pack", AccentGreen, delegate { ImportExistingPackDialog(); }));
             actions.Controls.Add(CreateActionButton("Setup Tutorial", Warn, delegate { ShowGettingStartedTutorial(false); }));
 
+            Panel rightHost = new Panel();
+            rightHost.Dock = DockStyle.Fill;
+            rightHost.AutoScroll = true;
+            rightHost.BackColor = Bg;
+            layout.Controls.Add(rightHost, 1, 0);
+
             TableLayoutPanel right = new TableLayoutPanel();
-            right.Dock = DockStyle.Fill;
+            right.Dock = DockStyle.Top;
+            right.Height = 620;
+            right.MinimumSize = new Size(0, 620);
             right.BackColor = Bg;
             right.RowCount = 4;
             right.ColumnCount = 1;
-            right.RowStyles.Add(new RowStyle(SizeType.Absolute, 145));
-            right.RowStyles.Add(new RowStyle(SizeType.Absolute, 145));
-            right.RowStyles.Add(new RowStyle(SizeType.Absolute, 260));
+            right.RowStyles.Add(new RowStyle(SizeType.Absolute, 150));
+            right.RowStyles.Add(new RowStyle(SizeType.Absolute, 100));
+            right.RowStyles.Add(new RowStyle(SizeType.Absolute, 210));
             right.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-            layout.Controls.Add(right, 1, 0);
+            rightHost.Controls.Add(right);
+            rightHost.ClientSizeChanged += delegate
+            {
+                // Leave a logical pixel of headroom so high-DPI rounding does not
+                // show a scrollbar when the content already fits exactly.
+                right.Height = Math.Max(620, rightHost.ClientSize.Height - 1);
+            };
 
             RoundedPanel progressCard = CreateCard();
-            progressCard.Padding = new Padding(26);
+            progressCard.Padding = new Padding(22);
+            progressCard.Margin = new Padding(12, 0, 0, 12);
             right.Controls.Add(progressCard, 0, 0);
             DashboardReadyLabel = new Label();
             DashboardReadyLabel.Dock = DockStyle.Top;
-            DashboardReadyLabel.Height = 58;
+            DashboardReadyLabel.Height = 52;
             DashboardReadyLabel.ForeColor = AccentGreen;
             DashboardReadyLabel.Font = new Font("Segoe UI Semibold", 29f, FontStyle.Bold);
             progressCard.Controls.Add(DashboardReadyLabel);
             Label status = new Label();
             status.Dock = DockStyle.Top;
-            status.Height = 36;
+            status.Height = 32;
             status.ForeColor = TextMuted;
             status.Font = new Font("Segoe UI", 10.5f);
             status.Text = "Add race tracks, characters, music, and optional cup icons.";
             progressCard.Controls.Add(status);
 
             RoundedPanel assetCard = CreateCard();
-            assetCard.Padding = new Padding(26);
+            assetCard.Padding = new Padding(22);
+            assetCard.Margin = new Padding(12, 0, 0, 12);
             right.Controls.Add(assetCard, 0, 1);
             DashboardAssetLabel = new Label();
             DashboardAssetLabel.Dock = DockStyle.Fill;
@@ -1193,30 +1225,50 @@ namespace MKWiiPackMaker
             assetCard.Controls.Add(DashboardAssetLabel);
 
             RoundedPanel sampleCard = CreateCard();
-            sampleCard.Padding = new Padding(26);
+            sampleCard.Padding = new Padding(22);
+            sampleCard.Margin = new Padding(12, 0, 0, 12);
             right.Controls.Add(sampleCard, 0, 2);
+
+            TableLayoutPanel sampleLayout = new TableLayoutPanel();
+            sampleLayout.Dock = DockStyle.Fill;
+            sampleLayout.BackColor = Card;
+            sampleLayout.ColumnCount = 1;
+            sampleLayout.RowCount = 2;
+            sampleLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 30));
+            sampleLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+            sampleCard.Controls.Add(sampleLayout);
+
             Label sampleTitle = CreateSectionTitle("HNS Pack Layout");
-            sampleTitle.Dock = DockStyle.Top;
-            sampleCard.Controls.Add(sampleTitle);
+            sampleLayout.Controls.Add(sampleTitle, 0, 0);
             Label sampleText = new Label();
             sampleText.Dock = DockStyle.Fill;
             sampleText.ForeColor = TextMuted;
             sampleText.Font = new Font("Segoe UI", 10.1f);
-            sampleText.Text = "Before exporting, every user needs their own MKWii base files in ./base_files. Do not publish Nintendo base files with your release.\n\nNeeded base folders:\nbase_files/Scene/UI\nbase_files/Scene/Model\nbase_files/Scene/Model/Kart\nbase_files/Race/Kart\nbase_files/Race/Course\nbase_files/Sound\n\nThe app uses ./tools automatically for SZS/BMG/image patching. Users should not need to touch Wiimms tools manually.";
-            sampleCard.Controls.Add(sampleText);
+            sampleText.Text = "Keep Nintendo base files private—never include them in a release.\nRequired folders:\nScene/UI  •  Scene/Model  •  Scene/Model/Kart\nRace/Kart  •  Race/Course  •  Sound\nBundled tools handle SZS, BMG, and image patching automatically.";
+            sampleLayout.Controls.Add(sampleText, 0, 1);
 
             RoundedPanel workflow = CreateCard();
-            workflow.Padding = new Padding(26);
+            workflow.Padding = new Padding(22);
+            workflow.Margin = new Padding(12, 0, 0, 0);
             right.Controls.Add(workflow, 0, 3);
+
+            TableLayoutPanel workflowLayout = new TableLayoutPanel();
+            workflowLayout.Dock = DockStyle.Fill;
+            workflowLayout.BackColor = Card;
+            workflowLayout.ColumnCount = 1;
+            workflowLayout.RowCount = 2;
+            workflowLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 30));
+            workflowLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+            workflow.Controls.Add(workflowLayout);
+
             Label flowTitle = CreateSectionTitle("Workflow");
-            flowTitle.Dock = DockStyle.Top;
-            workflow.Controls.Add(flowTitle);
+            workflowLayout.Controls.Add(flowTitle, 0, 0);
             Label flow = new Label();
             flow.Dock = DockStyle.Fill;
             flow.ForeColor = TextMain;
-            flow.Font = new Font("Segoe UI", 10.3f);
-            flow.Text = "1. Setup: copy your own MKWii base files into ./base_files once.\n\n2. Tracks: click Source File to add .szs tracks, then type Custom Name.\n\n3. Characters/Music: drop complete character packs and .brstm music.\n\n4. Cup Icons: click a cup, then click an icon. Reset keeps original.\n\n5. Export: one click builds the Riivolution/HNS pack.";
-            workflow.Controls.Add(flow);
+            flow.Font = new Font("Segoe UI", 9.7f);
+            flow.Text = "1. Setup legal MKWii base files.\n2. Assign SZS tracks and custom names.\n3. Add character packs and music.\n4. Choose optional cup icons.\n5. Validate, then export the pack.";
+            workflowLayout.Controls.Add(flow, 0, 1);
 
             UpdateReadyLabels();
         }
@@ -2110,7 +2162,10 @@ namespace MKWiiPackMaker
             grid.DefaultCellStyle.SelectionBackColor = Color.FromArgb(65, 105, 176);
             grid.DefaultCellStyle.SelectionForeColor = Color.White;
             grid.DefaultCellStyle.Font = new Font("Segoe UI", 9.5f);
+            grid.DefaultCellStyle.Padding = new Padding(4, 0, 4, 0);
+            grid.AlternatingRowsDefaultCellStyle.BackColor = Card2;
             grid.GridColor = Border;
+            grid.CellBorderStyle = DataGridViewCellBorderStyle.SingleHorizontal;
             grid.RowTemplate.Height = 34;
             return grid;
         }
@@ -2146,6 +2201,8 @@ namespace MKWiiPackMaker
             tb.BackColor = Color.FromArgb(16, 20, 29);
             tb.ForeColor = TextMain;
             tb.Font = new Font("Segoe UI", 10f);
+            tb.Enter += delegate { tb.BackColor = FieldFocus; };
+            tb.Leave += delegate { tb.BackColor = Color.FromArgb(16, 20, 29); };
             return tb;
         }
 
@@ -2166,6 +2223,8 @@ namespace MKWiiPackMaker
             c.ForeColor = TextMain;
             c.FlatStyle = FlatStyle.Flat;
             c.Font = new Font("Segoe UI", 10f);
+            c.Enter += delegate { c.BackColor = FieldFocus; };
+            c.Leave += delegate { c.BackColor = Color.FromArgb(16, 20, 29); };
             c.Items.AddRange(items);
             int idx = Array.IndexOf(items, selected);
             c.SelectedIndex = idx >= 0 ? idx : 0;
@@ -2183,10 +2242,23 @@ namespace MKWiiPackMaker
             btn.ForeColor = Color.White;
             btn.FlatStyle = FlatStyle.Flat;
             btn.FlatAppearance.BorderSize = 0;
+            btn.FlatAppearance.MouseOverBackColor = Blend(color, Color.White, 0.12f);
+            btn.FlatAppearance.MouseDownBackColor = Blend(color, Color.Black, 0.14f);
             btn.Font = new Font("Segoe UI Semibold", 9.5f, FontStyle.Bold);
             btn.Cursor = Cursors.Hand;
+            btn.UseVisualStyleBackColor = false;
+            btn.AccessibleName = text;
             btn.Click += delegate { action(); };
             return btn;
+        }
+
+        private static Color Blend(Color from, Color to, float amount)
+        {
+            amount = Math.Max(0f, Math.Min(1f, amount));
+            int red = (int)Math.Round(from.R + ((to.R - from.R) * amount));
+            int green = (int)Math.Round(from.G + ((to.G - from.G) * amount));
+            int blue = (int)Math.Round(from.B + ((to.B - from.B) * amount));
+            return Color.FromArgb(from.A, red, green, blue);
         }
 
         private void AddButtonCell(TableLayoutPanel table, Button button, int col, int row)
